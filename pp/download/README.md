@@ -8,6 +8,54 @@ provider + Dart-AOT inspector) and **Blutter** (Dart AOT snapshot → symbols
 and AArch64 disassembly).  No server-side knowledge was assumed; each claim
 is tied to something in the binary.
 
+## 0. Status — what works and what does not
+
+**Works:**
+
+| | |
+|---|---|
+| installs | single APK (`Famspace-universal.apk`), one tap, no XAPK installer needed |
+| the Play Store redirect | gone — PairIP's licence check is neutralised |
+| login | works — the app reports the original Play certificate fingerprint, so the backend accepts its requests |
+| traffic | every request and answer passes through the in-app proxy, and the log shows both |
+
+**Does not work yet: the wallet and Premium.**  The API does not answer with
+plain JSON — every payload is encrypted into the `responseData` field:
+
+```json
+{"success":true,"code":200,"responseData":"<encrypted, base64>","t":1795734498}
+```
+
+so the wallet is *inside* an encrypted payload and no rule that rewrites a
+field name can reach it.  The rewrite machinery is complete and proven
+(`test_crypto_proxy.sh`: the client receives `gems=999999999` inside a
+correctly re-encrypted payload) — what is missing is the AES key.
+
+The key is **not** in the app's binary.  Everything below was tried against a
+captured payload:
+
+* 105 million key candidates over `libapp.so` (every offset, printable/hex/
+  base64 forms, SHA-256/MD5 derivations) with AES-CBC/CTR/GCM;
+* 231 million candidates over every printable substring (8–64 chars) of every
+  file in the APK — raw, base64 and hex — with AES, **ChaCha20 and Salsa20**
+  (the heap carries pointycastle's ChaCha20/Salsa20 error messages, and a
+  stream cipher is what the payload lengths point at: 273, 33, 16 bytes);
+* the same sweep with the nonce taken from the key's neighbourhood;
+* the app's own memory at runtime (the proxy reads `/proc/self/mem`): no
+  16/24/32-byte window decrypts it;
+* the HS256 secret of the session token (a JWT is a known-plaintext oracle)
+  and the secret the app signs its requests with (MD5 over the uuid and the
+  request data, in every plausible order) — neither is a string in the app.
+
+The remaining route is the **Dart AOT**: read the snapshot's object pool,
+find the crypto helper and the key constant.  That needs Blutter and a Dart
+SDK 3.10.9 — a substantial job, and the key may well be obfuscated.
+
+Note also what this can never do: the unlock call is checked **server-side**
+(`POST /api/v1/space/favorite/unlock` → `{"code":402,"error":"insufficient
+coins"}`).  The server's view of the account cannot be changed from the
+client; a rewrite can only make the *client* believe it is a member.
+
 ---
 
 ## 1. What the deliverable is
