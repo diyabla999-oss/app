@@ -66,6 +66,7 @@ echo "== compile"
 javac -nowarn -d "$WORK/classes" -cp "$JSON_JAR" \
   "$HERE/helper/src/com/famspace/unlock/LocalProxy.java" \
   "$HERE/helper/src/com/famspace/unlock/Rules.java" \
+  "$HERE/helper/src/com/famspace/unlock/Crypto.java" \
   "$WORK/FakeUpstream.java" "$WORK/RunProxy.java"
 
 echo "== run"

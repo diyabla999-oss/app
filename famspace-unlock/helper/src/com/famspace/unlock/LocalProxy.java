@@ -10,6 +10,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -32,7 +33,7 @@ public final class LocalProxy {
      * serving a request - an old build without this marker cannot be told
      * apart from a new one that simply has nothing to log.
      */
-    public static final String BUILD_ID = "2026-11-26-wallet2";
+    public static final String BUILD_ID = "2026-11-26-wallet3";
 
     // Android refuses privileged ports (<1024) for unprivileged apps:
     // binding 888 fails with BindException: EACCES (permission denied).
@@ -63,6 +64,13 @@ public final class LocalProxy {
     private final java.util.LinkedList<String> log = new java.util.LinkedList<String>();
     private volatile String lastPath = "";
     private volatile String lastMethod = "";
+
+    // the learned AES key of the encrypted API payloads (null until found)
+    private volatile byte[] cryptoKey;
+    private volatile Crypto.Combo cryptoCombo;
+    // key material seen in earlier answers (the server may hand it out in
+    // the config, while the encrypted payload comes later)
+    private final List<byte[]> knownKeys = new ArrayList<byte[]>();
 
     public LocalProxy() {
         this(UPSTREAM, DEFAULT_PORT, "http://127.0.0.1:" + DEFAULT_PORT);
@@ -200,6 +208,20 @@ public final class LocalProxy {
             String target = normalise(rawTarget);
             lastPath = target;
 
+            // The API answers with an encrypted payload ("responseData"), so
+            // the wallet cannot be rewritten by key name.  The key either
+            // comes from the server (device/install) or is assembled at
+            // runtime, so the whole traffic is logged: request headers (the
+            // signature) and every response body.
+            record("REQ " + method + " " + target);
+            if (!headers.isEmpty()) {
+                record("    headers: " + redactHeaders(headers));
+            }
+            if (body != null && body.length > 0) {
+                String rb = new String(body, StandardCharsets.UTF_8);
+                record("    body: " + redactBody(rb));
+            }
+
             // request log, readable from the phone browser:
             // http://127.0.0.1:888/__famunlock/log
             if (target.startsWith("/__famunlock/log")) {
@@ -275,38 +297,32 @@ public final class LocalProxy {
             if (payload.length > 0) {
                 String text = new String(payload, StandardCharsets.UTF_8);
                 boolean json = ctype != null && ctype.toLowerCase(Locale.US).contains("json");
+                record("    response (" + payload.length + " bytes): "
+                        + text.substring(0, Math.min(700, text.length())));
                 if (json) {
                     try {
-                        Object doc = new JSONObject(text);
+                        JSONObject doc = new JSONObject(text);
+                        // the API ships its payload encrypted -> decrypt it,
+                        // rewrite the wallet and encrypt it again
+                        doc = handleEncrypted(doc, headers, text);
                         java.util.List<String> keys = Rules.rewrite(doc, publicUrl);
                         if (!keys.isEmpty()) {
-                            payload = doc.toString().getBytes(StandardCharsets.UTF_8);
-                            record("   rewrote " + path + ": " + keys);
-                            // what the app actually receives - this is the
-                            // answer to "what does the phone see"
-                            String rewritten = new String(payload, StandardCharsets.UTF_8);
-                            record("   app sees " + path + ": "
-                                    + rewritten.substring(0, Math.min(600, rewritten.length())));
+                            record("    rewrote: " + keys);
+                        }
+                        // the answer has to be written back whenever it
+                        // changed - the rewrite can be inside the encrypted
+                        // payload, where the outer object looks untouched
+                        String rewritten = doc.toString();
+                        if (!rewritten.equals(text)) {
+                            payload = rewritten.getBytes(StandardCharsets.UTF_8);
+                            record("    app sees: "
+                                    + rewritten.substring(0, Math.min(700, rewritten.length())));
                         } else {
-                            record("   no rule matched " + path);
+                            record("    no rule matched");
                         }
-                        // the wallet can live in any answer, so log every body
-                        // that mentions it - that is how we find the field the
-                        // app really reads
-                        String lower = text.toLowerCase(Locale.US);
-                        if (lower.contains("coin") || lower.contains("gem")
-                                || lower.contains("vip") || lower.contains("premium")
-                                || path.contains("profile") || path.contains("login")
-                                || path.contains("wallet") || path.contains("/me/")) {
-                            record("   body " + path + ": " + text.substring(0, Math.min(600, text.length())));
-                        }
-                    } catch (Exception e) {
-                        record("   body is not a JSON object " + path + ": "
-                                + text.substring(0, Math.min(200, text.length())));
+                    } catch (Throwable e) {
+                        record("    rewrite failed: " + e);
                     }
-                } else if (text.length() > 0) {
-                    record("   not json " + path + ": "
-                            + text.substring(0, Math.min(200, text.length())));
                 }
             }
 
@@ -325,6 +341,247 @@ public final class LocalProxy {
                 log.removeFirst();
             }
         }
+    }
+
+    /**
+     * The API answers with an encrypted payload: the real answer sits in the
+     * "responseData" field, encrypted.  Without the key the wallet cannot be
+     * touched - so the proxy learns the key from the traffic:
+     *
+     *  * a key that the server hands out in the clear (config, device/install)
+     *  * a key derived from the bearer token (SHA-256/MD5 of it)
+     *
+     * and checks every candidate against the encrypted payloads it has seen.
+     * When one really decrypts them, the proxy keeps it and from then on
+     * decrypts, rewrites and re-encrypts every answer.
+     */
+    private JSONObject handleEncrypted(JSONObject doc, Map<String, String> headers, String rawText) {
+        try {
+            // 1) ALWAYS harvest key material - the server may hand out the key
+            //    in one answer (config, device/install) while the encrypted
+            //    payload comes in another one
+            List<byte[]> cands = keyCandidates(headers, doc, rawText);
+            synchronized (knownKeys) {
+                for (byte[] c : cands) {
+                    boolean seen = false;
+                    for (byte[] k : knownKeys) {
+                        if (java.util.Arrays.equals(k, c)) {
+                            seen = true;
+                            break;
+                        }
+                    }
+                    if (!seen) {
+                        knownKeys.add(c);
+                    }
+                }
+                while (knownKeys.size() > 64) {
+                    knownKeys.remove(0);
+                }
+            }
+
+            // 2) is there an encrypted payload in this answer?
+            String b64 = null;
+            String field = null;
+            for (String key : new String[]{"responseData", "response_data", "data",
+                    "payload", "encryptedData", "result", "content"}) {
+                Object v = doc.opt(key);
+                if (v instanceof String && ((String) v).length() > 16) {
+                    b64 = (String) v;
+                    field = key;
+                    break;
+                }
+            }
+            if (b64 == null) {
+                return doc;
+            }
+            byte[] blob = Crypto.decodeBase64(b64);
+            if (blob == null || blob.length < 24) {
+                return doc;
+            }
+            // the field holds plain JSON -> nothing to do
+            String probe = new String(blob, StandardCharsets.UTF_8);
+            if (probe.trim().startsWith("{")) {
+                return doc;
+            }
+
+            List<Crypto.Combo> combos = Crypto.combos(blob.length);
+
+            // 3) the key we already know
+            if (cryptoKey != null && cryptoCombo != null) {
+                byte[] plain = Crypto.decrypt(cryptoKey, blob, cryptoCombo);
+                if (Crypto.looksLikeJson(plain)) {
+                    return rewriteEncrypted(doc, field, plain, blob);
+                }
+            }
+
+            // 4) try everything we have seen so far
+            List<byte[]> pool;
+            synchronized (knownKeys) {
+                pool = new ArrayList<byte[]>(knownKeys);
+            }
+            for (byte[] cand : pool) {
+                Crypto.Combo combo = Crypto.findCombo(cand, blob, combos);
+                if (combo != null) {
+                    cryptoKey = cand;
+                    cryptoCombo = combo;
+                    record("   learned the API key (" + combo + ")");
+                    byte[] plain = Crypto.decrypt(cand, blob, combo);
+                    return rewriteEncrypted(doc, field, plain, blob);
+                }
+            }
+            record("   payload is encrypted (" + blob.length + " bytes) and the key is still unknown");
+        } catch (Exception ignored) {
+        }
+        return doc;
+    }
+
+    /** rewrite the decrypted payload and put it back, encrypted */
+    private JSONObject rewriteEncrypted(JSONObject doc, String field, byte[] plain, byte[] blob) {
+        try {
+            String text = new String(plain, StandardCharsets.UTF_8).trim();
+            record("   decrypted " + field + ": " + text.substring(0, Math.min(700, text.length())));
+            Object inner = new JSONObject(text);
+            java.util.List<String> keys = Rules.rewrite(inner, publicUrl);
+            if (!keys.isEmpty()) {
+                record("   decrypted rewrite: " + keys);
+            }
+            byte[] newPlain = inner.toString().getBytes(StandardCharsets.UTF_8);
+            byte[] enc = Crypto.encrypt(cryptoKey, blob, cryptoCombo, newPlain);
+            if (enc != null) {
+                doc.put(field, Crypto.encodeBase64(enc));
+                record("   re-encrypted " + field);
+            }
+        } catch (Exception e) {
+            record("   decrypted payload is not JSON: " + e);
+        }
+        return doc;
+    }
+
+    /** every place a key could hide in the traffic */
+    private List<byte[]> keyCandidates(Map<String, String> headers, JSONObject doc, String rawText) {
+        List<byte[]> out = new ArrayList<byte[]>();
+        // 1) values that look like key material in a plain answer
+        try {
+            java.util.Iterator<String> keys = doc.keys();
+            while (keys.hasNext()) {
+                String k = keys.next();
+                Object v = doc.opt(k);
+                if (!(v instanceof String)) {
+                    continue;
+                }
+                String s = (String) v;
+                if (s.length() < 8 || s.length() > 128) {
+                    continue;
+                }
+                String lk = k.toLowerCase(Locale.US);
+                boolean named = lk.contains("key") || lk.contains("secret")
+                        || lk.contains("encrypt") || lk.contains("salt")
+                        || lk.contains("cipher") || lk.contains("nonce")
+                        || lk.contains("iv");
+                byte[] raw = s.getBytes(StandardCharsets.UTF_8);
+                // the string itself, when it already is a key length
+                if (raw.length == 16 || raw.length == 24 || raw.length == 32) {
+                    out.add(raw);
+                }
+                // base64 encoded
+                byte[] d = Crypto.decodeBase64(s);
+                if (d != null && (d.length == 16 || d.length == 24 || d.length == 32)) {
+                    out.add(d);
+                }
+                // hex encoded
+                if (s.length() == 32 || s.length() == 48 || s.length() == 64) {
+                    try {
+                        byte[] h = new byte[s.length() / 2];
+                        boolean hex = true;
+                        for (int i = 0; i < h.length; i++) {
+                            int hi = Character.digit(s.charAt(2 * i), 16);
+                            int lo = Character.digit(s.charAt(2 * i + 1), 16);
+                            if (hi < 0 || lo < 0) {
+                                hex = false;
+                                break;
+                            }
+                            h[i] = (byte) ((hi << 4) | lo);
+                        }
+                        if (hex && (h.length == 16 || h.length == 24 || h.length == 32)) {
+                            out.add(h);
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
+                // derived from the string
+                if (named) {
+                    byte[] sh = Crypto.sha256(raw);
+                    if (sh != null) {
+                        out.add(sh);
+                    }
+                    byte[] md = Crypto.md5(raw);
+                    if (md != null) {
+                        out.add(md);
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        // 2) derived from the bearer token / the signature
+        for (Map.Entry<String, String> e : headers.entrySet()) {
+            String lk = e.getKey();
+            if (!lk.equals("authorization") && !lk.equals("sign") && !lk.equals("signature")
+                    && !lk.equals("token") && !lk.equals("x-sign")) {
+                continue;
+            }
+            byte[] raw = e.getValue().getBytes(StandardCharsets.UTF_8);
+            byte[] h = Crypto.sha256(raw);
+            if (h != null) {
+                out.add(h);
+            }
+            byte[] m = Crypto.md5(raw);
+            if (m != null) {
+                out.add(m);
+            }
+            // a token that is already a key length
+            int start = e.getValue().indexOf(' ');
+            String token = start >= 0 ? e.getValue().substring(start + 1).trim() : e.getValue().trim();
+            byte[] t = token.getBytes(StandardCharsets.UTF_8);
+            if (t.length == 16 || t.length == 24 || t.length == 32) {
+                out.add(t);
+            }
+            byte[] td = Crypto.decodeBase64(token);
+            if (td != null && (td.length == 16 || td.length == 24 || td.length == 32)) {
+                out.add(td);
+            }
+        }
+        return out;
+    }
+
+    /** Hides the bearer token, keeps every other header (the signature!). */
+    private static String redactHeaders(Map<String, String> headers) {
+        StringBuilder sb = new StringBuilder("{");
+        boolean first = true;
+        for (Map.Entry<String, String> e : headers.entrySet()) {
+            String k = e.getKey();
+            if (!first) {
+                sb.append(", ");
+            }
+            first = false;
+            String v = e.getValue();
+            if (k.equals("authorization") || k.equals("cookie")) {
+                v = "<redacted " + v.length() + " chars>";
+            }
+            sb.append(k).append('=').append(v);
+        }
+        return sb.append('}').toString();
+    }
+
+    /** Hides passwords and tokens in a JSON request body. */
+    private static String redactBody(String body) {
+        String out = body;
+        for (String key : new String[]{"password", "passwd", "pwd", "token",
+                "accessToken", "refreshToken", "idToken", "code", "otp",
+                "verificationCode", "sessionId", "deviceToken"}) {
+            out = out.replaceAll("(?i)\"" + key + "\"\\s*:\\s*\"[^\"]*\"",
+                    "\"" + key + "\":\"<redacted>\"");
+        }
+        return out;
     }
 
     /** Strips the padding prefix that the patched host string carries. */
