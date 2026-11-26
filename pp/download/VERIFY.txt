@@ -26,9 +26,13 @@ Open this in the phone's browser (while the app is running):
 
 The FIRST line of the log page is always a banner:
 
-     FamUnlock proxy build 2026-11-26-wallet3  listening on ports 8888,888
+     FamUnlock proxy build 2026-11-26-wallet5  listening on ports 8888,888
+     [scan: <state>, jwt: <state>]
 
   * banner present  -> this is the current build, the diagnostics below apply
+  * the banner also shows the state of the two searches:
+      [scan: idle|running|KEY FOUND|no key|failed: ...]
+      [jwt:  idle|cracking|SECRET FOUND|not found|failed: ...]
   * no banner       -> an OLD build is still installed
 
 8888 is the port the app talks to. 888 is the legacy port and only binds on

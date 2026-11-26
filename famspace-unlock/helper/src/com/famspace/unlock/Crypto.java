@@ -428,6 +428,89 @@ public final class Crypto {
         }
     }
 
+    /**
+     * Cracks the secret the app signs its requests with.
+     *
+     * The body is
+     *   anm=famspace&ver=…&uuid=<uuid>&request_data=<enc>&sign=<md5 hex>
+     * and the signature covers the uuid, the request data and a secret the
+     * app knows and the server knows.  Every plausible order is tried.
+     *
+     * @return the secret bytes or null
+     */
+    public static byte[] crackSignSecret(String body, String dictionary) {
+        if (body == null || dictionary == null) {
+            return null;
+        }
+        int sign = body.indexOf("&sign=");
+        if (sign < 0) {
+            return null;
+        }
+        String prefix = body.substring(0, sign);
+        String want = body.substring(sign + 6);
+        if (want.length() != 32) {
+            return null;
+        }
+        String uuid = field(prefix, "uuid");
+        String data = field(prefix, "request_data");
+        if (uuid == null || data == null) {
+            return null;
+        }
+        byte[] u = uuid.getBytes(StandardCharsets.US_ASCII);
+        byte[] d = data.getBytes(StandardCharsets.US_ASCII);
+        byte[] p = prefix.getBytes(StandardCharsets.US_ASCII);
+        String[] lines = dictionary.split("\n");
+        for (String line : lines) {
+            if (line.isEmpty()) {
+                continue;
+            }
+            byte[] s = line.getBytes(StandardCharsets.US_ASCII);
+            if (md5Hex(concat(u, d, s)).equals(want)) return s;
+            if (md5Hex(concat(u, s, d)).equals(want)) return s;
+            if (md5Hex(concat(s, u, d)).equals(want)) return s;
+            if (md5Hex(concat(d, s)).equals(want)) return s;
+            if (md5Hex(concat(s, d)).equals(want)) return s;
+            if (md5Hex(concat(u, s)).equals(want)) return s;
+            if (md5Hex(concat(s, u)).equals(want)) return s;
+            if (md5Hex(concat(p, s)).equals(want)) return s;
+            if (md5Hex(concat(s, p)).equals(want)) return s;
+            byte[] dec = decodeBase64(line);
+            if (dec != null && dec.length > 0) {
+                if (md5Hex(concat(u, d, dec)).equals(want)) return dec;
+                if (md5Hex(concat(u, dec, d)).equals(want)) return dec;
+                if (md5Hex(concat(dec, u, d)).equals(want)) return dec;
+                if (md5Hex(concat(d, dec)).equals(want)) return dec;
+                if (md5Hex(concat(dec, d)).equals(want)) return dec;
+                if (md5Hex(concat(p, dec)).equals(want)) return dec;
+                if (md5Hex(concat(dec, p)).equals(want)) return dec;
+            }
+        }
+        return null;
+    }
+
+    private static String md5Hex(byte[] in) {
+        byte[] d = md5(in);
+        if (d == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (byte b : d) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
+    }
+
+    /** reads one field out of an url encoded string */
+    private static String field(String body, String name) {
+        for (String part : body.split("&")) {
+            int eq = part.indexOf('=');
+            if (eq > 0 && part.substring(0, eq).equals(name)) {
+                return part.substring(eq + 1);
+            }
+        }
+        return null;
+    }
+
     /** key candidates derived from a secret we cracked */
     public static List<byte[]> secretCandidates(byte[] secret) {
         List<byte[]> out = new ArrayList<byte[]>();
@@ -564,6 +647,10 @@ public final class Crypto {
             }
         }
         return sb.toString();
+    }
+
+    private static byte[] concat(byte[] a, byte[] b, byte[] c) {
+        return concat(concat(a, b), c);
     }
 
     private static byte[] concat(byte[] a, byte[] b) {

@@ -33,7 +33,7 @@ public final class LocalProxy {
      * serving a request - an old build without this marker cannot be told
      * apart from a new one that simply has nothing to log.
      */
-    public static final String BUILD_ID = "2026-11-26-wallet4";
+    public static final String BUILD_ID = "2026-11-26-wallet5";
 
     // Android refuses privileged ports (<1024) for unprivileged apps:
     // binding 888 fails with BindException: EACCES (permission denied).
@@ -78,6 +78,9 @@ public final class LocalProxy {
     private volatile byte[] jwtSecret;
     // the one shot memory scan
     private volatile boolean scanStarted;
+    // what the scan and the JWT crack are doing (shown in the log banner)
+    private volatile String scanState = "idle";
+    private volatile String jwtState = "idle";
 
     public LocalProxy() {
         this(UPSTREAM, DEFAULT_PORT, "http://127.0.0.1:" + DEFAULT_PORT);
@@ -236,7 +239,9 @@ public final class LocalProxy {
                 // the banner is regenerated on every read, so the page always
                 // says which build is serving it
                 sb.append("FamUnlock proxy build ").append(BUILD_ID)
-                        .append("  listening on ports ").append(ports()).append('\n');
+                        .append("  listening on ports ").append(ports())
+                        .append("  [scan: ").append(scanState)
+                        .append(", jwt: ").append(jwtState).append(']').append('\n');
                 synchronized (log) {
                     for (String entry : log) {
                         sb.append(entry).append('\n');
@@ -396,11 +401,14 @@ public final class LocalProxy {
         }
 
         public void run() {
+            proxy.scanState = "running";
             proxy.record("   scanning the app's memory for the key ...");
             byte[] key = MemoryScan.scan(blob, combos, new ScanProgress(proxy));
             if (key != null) {
+                proxy.scanState = "KEY FOUND";
                 proxy.record("   the key is known now - the next answer will be rewritten");
             } else {
+                proxy.scanState = "no key";
                 proxy.record("   memory scan: no key found");
             }
         }
@@ -426,6 +434,7 @@ public final class LocalProxy {
         }
 
         public void failed(Exception e) {
+            proxy.scanState = "failed: " + e;
             proxy.record("   memory scan failed: " + e);
         }
     }
@@ -446,6 +455,7 @@ public final class LocalProxy {
         int sp = auth.indexOf(' ');
         String token = sp >= 0 ? auth.substring(sp + 1).trim() : auth.trim();
         try {
+            jwtState = "cracking";
             byte[] secret = Crypto.crackJwtSecret(token, dict, 0);
             if (secret == null) {
                 // the heap packs strings back to back, so the secret can be a
@@ -457,8 +467,10 @@ public final class LocalProxy {
                     }
                 }
             }
+            jwtState = (secret == null) ? "not found" : "SECRET FOUND";
             return secret;
         } catch (Throwable e) {
+            jwtState = "failed: " + e;
             return null;
         }
     }
@@ -544,6 +556,12 @@ public final class LocalProxy {
             //    secret - and a JWT is a known-plaintext oracle for it
             if (jwtSecret == null) {
                 jwtSecret = crackJwt(headers);
+                if (jwtSecret == null && reqBody != null) {
+                    jwtSecret = Crypto.crackSignSecret(reqBody, dictionary);
+                    if (jwtSecret != null) {
+                        record("   cracked the request signing secret");
+                    }
+                }
                 if (jwtSecret != null) {
                     record("   cracked the JWT secret from the app's own strings");
                     List<byte[]> derived = Crypto.secretCandidates(jwtSecret);
