@@ -30,6 +30,12 @@ public final class ProxyHolder {
 
     /** loads the string dictionary from the assets (once) */
     private static void loadDictionary(Context context) {
+        if (context != null && LocalCache.dataDir == null) {
+            try {
+                LocalCache.dataDir = context.getApplicationInfo().dataDir;
+            } catch (Throwable ignored) {
+            }
+        }
         if (LocalProxy.dictionary != null || context == null) {
             return;
         }

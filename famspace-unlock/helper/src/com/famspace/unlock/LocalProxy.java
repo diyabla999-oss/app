@@ -33,7 +33,7 @@ public final class LocalProxy {
      * serving a request - an old build without this marker cannot be told
      * apart from a new one that simply has nothing to log.
      */
-    public static final String BUILD_ID = "2026-11-26-wallet5";
+    public static final String BUILD_ID = "2026-11-26-wallet6";
 
     // Android refuses privileged ports (<1024) for unprivileged apps:
     // binding 888 fails with BindException: EACCES (permission denied).
@@ -81,6 +81,9 @@ public final class LocalProxy {
     // what the scan and the JWT crack are doing (shown in the log banner)
     private volatile String scanState = "idle";
     private volatile String jwtState = "idle";
+    // the state of the cache patch
+    private volatile String cacheState = "idle";
+    private volatile boolean cachePatched;
 
     public LocalProxy() {
         this(UPSTREAM, DEFAULT_PORT, "http://127.0.0.1:" + DEFAULT_PORT);
@@ -139,6 +142,7 @@ public final class LocalProxy {
             }
         }
         running = true;
+        patchLocalCache();
         for (final ServerSocket s : servers) {
             Thread t = new Thread(() -> serve(s), "famunlock-" + s.getLocalPort());
             t.setDaemon(false);
@@ -241,7 +245,8 @@ public final class LocalProxy {
                 sb.append("FamUnlock proxy build ").append(BUILD_ID)
                         .append("  listening on ports ").append(ports())
                         .append("  [scan: ").append(scanState)
-                        .append(", jwt: ").append(jwtState).append(']').append('\n');
+                        .append(", jwt: ").append(jwtState)
+                        .append(", cache: ").append(cacheState).append(']').append('\n');
                 synchronized (log) {
                     for (String entry : log) {
                         sb.append(entry).append('\n');
@@ -372,6 +377,59 @@ public final class LocalProxy {
      * Cracks the HS256 secret of the bearer token with the app's own strings.
      * The token never leaves the phone - only the result is used.
      */
+
+
+    /**
+     * Patches the app's own cache.  What the app caches is the DECRYPTED
+     * answer (the Dart side decrypts before storing), so the wallet and the
+     * premium flags can be set there - no key needed.
+     */
+    private void patchLocalCache() {
+        if (cachePatched) {
+            return;
+        }
+        cachePatched = true;
+        Thread t = new Thread(new CacheTask(this), "famunlock-cache");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** the cache patch (a named class: d8 trips over nested anonymous ones) */
+    private static final class CacheTask implements Runnable {
+        private final LocalProxy proxy;
+
+        CacheTask(LocalProxy proxy) {
+            this.proxy = proxy;
+        }
+
+        public void run() {
+            // the Dart side stores the answer AFTER it was received, so the
+            // cache is patched again and again for a while
+            for (int round = 0; round < 20; round++) {
+                try {
+                    List<LocalCache.Hit> hits = LocalCache.patch();
+                    if (!hits.isEmpty()) {
+                        for (LocalCache.Hit h : hits) {
+                            proxy.record("   patched " + h.file + " -> " + h.keys);
+                        }
+                        proxy.cacheState = "patched " + hits.size() + " file(s)";
+                    } else if (round == 0) {
+                        proxy.cacheState = "no cached answer found";
+                        proxy.record("   no cached answer with a wallet in the app's data dir");
+                    }
+                } catch (Throwable e) {
+                    proxy.cacheState = "failed: " + e;
+                    proxy.record("   cache patch failed: " + e);
+                    return;
+                }
+                try {
+                    Thread.sleep(3000);
+                } catch (InterruptedException ignored) {
+                    return;
+                }
+            }
+        }
+    }
 
     /**
      * Scans the app's own memory for the key.  The proxy lives inside the app
@@ -582,6 +640,7 @@ public final class LocalProxy {
             }
             record("   payload is encrypted (" + blob.length + " bytes) and the key is still unknown");
             startMemoryScan(blob, combos);
+            patchLocalCache();
         } catch (Exception ignored) {
         }
         return doc;

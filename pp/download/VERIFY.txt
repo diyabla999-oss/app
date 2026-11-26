@@ -26,13 +26,14 @@ Open this in the phone's browser (while the app is running):
 
 The FIRST line of the log page is always a banner:
 
-     FamUnlock proxy build 2026-11-26-wallet5  listening on ports 8888,888
-     [scan: <state>, jwt: <state>]
+     FamUnlock proxy build 2026-11-26-wallet6  listening on ports 8888,888
+     [scan: <state>, jwt: <state>, cache: <state>]
 
   * banner present  -> this is the current build, the diagnostics below apply
-  * the banner also shows the state of the two searches:
-      [scan: idle|running|KEY FOUND|no key|failed: ...]
-      [jwt:  idle|cracking|SECRET FOUND|not found|failed: ...]
+  * the banner also shows the state of the three searches:
+      [scan:  idle|running|KEY FOUND|no key|failed: ...]
+      [jwt:   idle|cracking|SECRET FOUND|not found|failed: ...]
+      [cache: idle|patched N file(s)|no cached answer found|failed: ...]
   * no banner       -> an OLD build is still installed
 
 8888 is the port the app talks to. 888 is the legacy port and only binds on
@@ -73,6 +74,12 @@ In the log:
   "payload is encrypted (...) and the key is still unknown"
       the key could not be derived from the traffic - the log shows every
       request and answer, so it can be worked out from that
+
+The cache patch is the interesting one: the proxy runs inside the app, so it
+can read the app's own data directory - and what the app caches is the
+DECRYPTED answer (the Dart side decrypts before storing).  The cached profile
+and the cached item list are patched directly, so the wallet and the premium
+flags are unlimited without ever needing the encryption key.
 
 Every request (with its headers) and every answer (with its body) is in the
 log, so nothing has to be guessed.
