@@ -20,12 +20,11 @@
 1. Uninstall the original <b>Famspace</b> (Play version). The patched build is
    re-signed with a different key, so an update over the Play install fails
    with <code>INSTALL_FAILED_UPDATE_INCOMPATIBLE</code>.<br>
-2. Delete any previously downloaded copy of <code>FamSpace-unlocked.xapk</code>
-   from the phone and download it again &mdash; older copies were broken and do
-   not install.<br>
-3. Install the XAPK with an XAPK installer, or push the APKs with
-   <code>adb install-multiple</code> (see below). All splits have to be
-   installed together.
+2. Delete any previously downloaded copy of the app from the phone &mdash;
+   older builds were broken and do not install.<br>
+3. Install <code>Famspace-universal.apk</code> (one tap) or the XAPK with an
+   XAPK installer. If you use the XAPK, all splits have to be installed
+   together.
 </div>
 
 <div class="note">
@@ -35,9 +34,20 @@ second app to install and no service to keep running. Just install the XAPK
 and open <b>Famspace</b>.
 </div>
 
+<div class="note">
+<b>Simplest: one APK, one tap</b><br>
+<a href="Famspace-universal.apk"><code>Famspace-universal.apk</code></a> is the whole
+patched app in a single file &mdash; base + native libraries in one package.
+Copy it to the phone and tap it. No XAPK installer, no split handling, no
+second app.<br>
+Everything is compiled into the app, so there is nothing else to start:
+open <b>Famspace</b> and it works.
+</div>
+
 <h2>Main files</h2>
 <ul>
-  <li><a href="FamSpace-unlocked.xapk">FamSpace-unlocked.xapk</a> &mdash; 49.7 MB &mdash; patched app, base + 19 splits</li>
+  <li><a href="Famspace-universal.apk">Famspace-universal.apk</a> &mdash; 84.5 MB &mdash; <b>single APK, installs with one tap</b></li>
+  <li><a href="FamSpace-unlocked.xapk">FamSpace-unlocked.xapk</a> &mdash; 49.7 MB &mdash; the same app as an XAPK (base + 19 splits), for an XAPK installer</li>
   <li><a href="README.md">README.md</a> &mdash; install &amp; usage guide</li>
   <li><a href="VERIFY.txt">VERIFY.txt</a> &mdash; md5 sums of the published files + install checklist</li>
   <li><a href="ANALYSIS.md">ANALYSIS.md</a> &mdash; the REA / Blutter analysis of the app</li>

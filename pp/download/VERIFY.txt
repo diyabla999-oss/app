@@ -1,0 +1,26 @@
+Famspace unlock - install checklist
+====================================
+
+Published build (verified by famspace-unlock/verify_build.sh + verify_apk.sh):
+b351db6c854c656527bd7ce79696c981  Famspace-universal.apk
+7df2a9929ccd7d5a027cf0dd1a55c23d  FamSpace-unlocked.xapk
+8f45f6c4a59db4bedfa19f10f0599f82  com.famspace.app.android.apk
+4f5a341f3bdaa1fbb6e63f4175ce8d84  config.arm64_v8a.apk
+6af2fccef9636f5b4c48db8f94cab6e8  config.xxhdpi.apk
+
+Install (simplest):
+  1. uninstall the original Famspace (Play version) - the patched build has a
+     different signature, installing over it fails with
+     INSTALL_FAILED_UPDATE_INCOMPATIBLE
+  2. delete any older copy of the app from the phone
+  3. tap Famspace-universal.apk to install it - one file, no XAPK installer,
+     no splits, no second app
+  4. open Famspace - the proxy starts inside the app, nothing else to do
+
+Install (XAPK instead):
+     adb install-multiple -r com.famspace.app.android.apk config.arm64_v8a.apk config.xxhdpi.apk
+
+If it still fails, adb prints the exact reason, e.g.
+  INSTALL_FAILED_INVALID          -> a .so was compressed (wrong file)
+  INSTALL_FAILED_UPDATE_INCOMPATIBLE -> the original app is still installed
+  INSTALL_FAILED_MISSING_SPLIT    -> the splits were not installed together

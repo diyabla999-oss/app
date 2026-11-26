@@ -22,6 +22,11 @@ DEST="${2:-/workspaces/app/pp/download}"
 echo "== verifying the build before publishing"
 "$HERE/verify_build.sh" "$OUT/FamSpace-unlocked.xapk" | tail -3
 
+if [ -f "$OUT/Famspace-universal.apk" ]; then
+  echo "== verifying the universal APK"
+  "$HERE/verify_apk.sh" "$OUT/Famspace-universal.apk" | tail -3
+fi
+
 echo "== publishing $OUT -> $DEST"
 mkdir -p "$DEST"
 rm -f "$DEST"/*.apk "$DEST"/*.xapk "$DEST"/manifest.json "$DEST"/icon.png
@@ -32,10 +37,11 @@ cp "$HERE/README.md" "$HERE/ANALYSIS.md" "$DEST"/
 
 echo "== verifying the published copy"
 "$HERE/verify_build.sh" "$DEST/FamSpace-unlocked.xapk" | tail -3
+[ -f "$DEST/Famspace-universal.apk" ] && "$HERE/verify_apk.sh" "$DEST/Famspace-universal.apk" | tail -3
 
 cd "$DEST"
 echo "== published:"
 ls -la *.xapk *.apk | awk '{printf "   %-32s %10.1f MB\n", $9, $5/1048576}'
-md5sum *.xapk
+md5sum *.xapk *.apk | grep -vE "config\.|FamspaceUnlock"
 echo
 echo "   do not install the old copy in pp/ - it is the pre-fix build"

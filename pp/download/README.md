@@ -17,9 +17,54 @@ service to keep alive — the rewrite proxy now lives **inside** the app.
 
 | file | what it is |
 |---|---|
-| `output/FamSpace-unlocked.xapk` | the app, patched: the rewrite proxy is compiled into `classes2.dex` and started by the app's own `Application.attachBaseContext()`, PairIP's Play licence check is disabled, and the service host points at `127.0.0.1:8888`; all 19 splits re-signed with one key |
-| `output/*.apk` | the same APKs individually, for `adb install-multiple` |
+| `output/Famspace-universal.apk` | **the whole app in one file** — base + the arm64 native libraries, re-signed. Install with one tap, no XAPK installer and no split handling |
+| `output/FamSpace-unlocked.xapk` | the same app as a split set (base + 19 splits) for an XAPK installer |
+| `output/*.apk` | the splits individually, for `adb install-multiple` |
 | `output/FamspaceUnlock.apk` | *optional* standalone helper (same proxy with a status screen); not needed with the build above |
+
+### The universal APK
+
+`build_universal.sh` folds the split set into one installable package:
+
+```
+base APK (dex, assets, res/, launcher icons)  +  lib/arm64-v8a/*.so
+```
+
+The split set of 1.0.8 is really just that:
+
+| split | content |
+|---|---|
+| `com.famspace.app.android.apk` | dex, assets, res/, `mipmap-{m,h,xh,xxh,xxxh}dpi` launcher icons, layouts, anims |
+| `config.arm64_v8a.apk` | the 21 native libraries, **no resources at all** |
+| `config.xxhdpi.apk` | ~100 extra xxhdpi drawables (AndroidX 9-patches and small vectors) |
+| `config.<lang>.apk` | ~163 translated strings (AndroidX widget labels + the launcher label) |
+
+The app is Flutter: the whole UI is drawn from `assets/` by the Dart code, so
+it is localised and pixel-perfect regardless of which density/language
+configuration the APK carries.  The universal APK therefore keeps the base's
+own `resources.arsc` and `AndroidManifest.xml` **byte-identical** and only
+adds the libraries.  What that costs is cosmetic: the launcher label stays
+the default one, and AndroidX assets fall back to the xhdpi variants the base
+already carries.
+
+The resource table is deliberately *not* re-linked with aapt2: aapt2
+re-allocates the resource ids, and the original binary `AndroidManifest.xml`
+references them by id — the launcher icon, the app label and the theme would
+end up pointing at the wrong resources.  Keeping the table as it is keeps
+every reference valid.
+
+The dex files are never touched either, so they keep dex 037 and all the
+in-place patches (in-app proxy, PairIP neutralised, Play certificate
+fingerprint).
+
+Only the v1 signature is replaced; the rest of `META-INF/` survives, because
+it holds runtime files (the AppLovin / Pangle / Unity adapter
+`verification.properties`, the Kotlin module descriptors, the licence texts).
+
+`verify_apk.sh` checks the result the same way `verify_build.sh` does for the
+XAPK: libraries stored uncompressed and 4096-aligned, dex 037 with valid
+checksums, no split attributes, valid v1+v2+v3 signatures, `zipalign -p 4`
+clean, and the patches still in place.
 
 ### Why login failed: the certificate fingerprint
 
@@ -83,15 +128,27 @@ stays intact.
 
 ## 2. Install on the phone
 
-### a) over adb (one command)
+### a) the universal APK (simplest)
+
+```bash
+./build_universal.sh          # -> output/Famspace-universal.apk
+```
+
+Copy `Famspace-universal.apk` to the phone and tap it.  One file, one tap,
+no XAPK installer, no split handling, no second app.
+
+**Uninstall the original Famspace first** (the Play version): the patched
+build is re-signed, so installing over it fails with
+`INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
+
+### b) over adb (one command)
 
 ```bash
 ./install_on_phone.sh          # adb from PATH or ~/tools/platform-tools/adb
 ```
 
 It uninstalls the original app (its signature differs from ours), installs
-all 19 splits with `adb install-multiple -r`, installs the helper and starts
-it.
+all 19 splits with `adb install-multiple -r` and removes the leftover helper.
 
 Manual equivalent:
 
@@ -104,12 +161,9 @@ adb install-multiple -r output/com.famspace.app.android.apk \
 (base + the two required splits are enough; the other 16 are optional
 language/config splits.)
 
-### b) without adb
+### c) without adb, using the XAPK
 
-0. **uninstall the original Famspace first** - the patched build is re-signed,
-   so an update over the Play install fails with
-   `INSTALL_FAILED_UPDATE_INCOMPATIBLE`;
-1. copy `output/FamSpace-unlocked.xapk` to the phone (USB, cloud drive, …) -
+1. copy `output/FamSpace-unlocked.xapk` to the phone (USB, cloud drive, …) —
    delete any older copy first, the pre-fix build does not install;
 2. install it with an XAPK installer (the splits have to go in together —
    installing them one by one fails with `INSTALL_FAILED_MISSING_SPLIT`);
@@ -308,6 +362,8 @@ mitm_addon.py      same rules as a mitmproxy addon
 pool_xref.py       find code that loads a given object-pool slot
 aot_dis.py         annotate raw arm64 code the way Blutter does
 install_on_phone.sh  adb install of everything
+build_universal.sh  fold the split set into one installable APK
+verify_apk.sh       the same checks as verify_build.sh, for the single APK
 publish.sh          verify -> copy the build to the download folder -> verify
 ANALYSIS.md        the full REA/Blutter findings
 output/            FamSpace-unlocked.xapk, 19 signed APKs, FamspaceUnlock.apk
