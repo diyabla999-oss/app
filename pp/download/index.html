@@ -44,6 +44,17 @@ Everything is compiled into the app, so there is nothing else to start:
 open <b>Famspace</b> and it works.
 </div>
 
+<div class="warn">
+<b>Current state</b><br>
+The app installs, logs in and no longer redirects to the Play Store &mdash; that all
+works. <b>The wallet and Premium are still the account's real values</b>: the API
+encrypts every answer into <code>responseData</code>, so the wallet sits inside an
+encrypted payload and the proxy cannot rewrite it. The key is not in the app's
+binary (over 300 million candidates were tried, with AES, ChaCha20 and Salsa20,
+in the binary and in the app's memory at runtime). The release notes describe
+exactly what was tried and what is left.
+</div>
+
 <div class="note">
 <b>Check the wallet</b><br>
 <strong>Open the app first</strong> &mdash; the proxy runs inside the app
