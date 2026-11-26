@@ -72,7 +72,27 @@ public final class LocalProxy {
         if (running) {
             return;
         }
-        server = new ServerSocket(port, 16, InetAddress.getByName("127.0.0.1"));
+        Throwable first = null;
+        // 1) the exact address the patched app talks to
+        try {
+            server = new ServerSocket(port, 16, InetAddress.getByName("127.0.0.1"));
+        } catch (Throwable t) {
+            first = t;
+            try {
+                // 2) any interface (covers a device where 127.0.0.1 is odd)
+                server = new ServerSocket(port, 16);
+            } catch (Throwable t2) {
+                try {
+                    // 3) IPv6 loopback
+                    server = new ServerSocket(port, 16, InetAddress.getByName("::1"));
+                } catch (Throwable t3) {
+                    if (first instanceof Exception) {
+                        throw (Exception) first;
+                    }
+                    throw new java.io.IOException("cannot bind the proxy port: " + t2);
+                }
+            }
+        }
         running = true;
         Thread t = new Thread(this::serve, "famunlock");
         t.setDaemon(false);

@@ -23,7 +23,8 @@ mkdir -p "$WORK/classes" "$OUT"
 
 echo "== javac"
 javac -nowarn -source 8 -target 8 -classpath "$AJ" -d "$WORK/classes" \
-  "$HERE"/helper/src/com/famspace/unlock/*.java 2>&1 | grep -v "bootstrap class path" || true
+  "$HERE"/helper/src/com/famspace/unlock/*.java 2>&1 | grep -v "bootstrap class path"
+[ -n "$(find "$WORK/classes" -name '*.class')" ] || { echo "javac produced no classes" >&2; exit 1; }
 
 echo "== d8"
 mkdir -p "$WORK/dex"

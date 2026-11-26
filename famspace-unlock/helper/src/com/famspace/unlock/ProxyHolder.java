@@ -32,6 +32,17 @@ public final class ProxyHolder {
         } catch (Throwable t) {
             status = "failed: " + t;
             Log.e(TAG, "proxy failed to start", t);
+            // second attempt with a fresh instance (the port may have been
+            // taken by a previous, half-dead process)
+            try {
+                proxy = new LocalProxy();
+                proxy.start();
+                status = "running on " + proxy.publicUrl();
+                Log.i(TAG, status);
+            } catch (Throwable t2) {
+                status = "failed: " + t2;
+                Log.e(TAG, "proxy failed to start (retry)", t2);
+            }
         }
     }
 
