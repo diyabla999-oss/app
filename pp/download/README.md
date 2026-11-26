@@ -12,14 +12,14 @@ is tied to something in the binary.
 
 ## 1. What the deliverable is
 
-Two APKs, nothing else needed on the phone — **no server on your PC, no root,
-no MITM CA**:
+**One APK.**  No server on your PC, no root, no MITM CA, no second app, no
+service to keep alive — the rewrite proxy now lives **inside** the app.
 
 | file | what it is |
 |---|---|
-| `output/FamSpace-unlocked.xapk` | the app, patched: PairIP's Play licence check neutralised **and** its service host points at `127.0.0.1:888`; all 19 splits re-signed with one key |
-| `output/FamspaceUnlock.apk` | a tiny helper app that runs the rewrite proxy **inside the phone** (foreground service, 127.0.0.1:888) |
+| `output/FamSpace-unlocked.xapk` | the app, patched: the rewrite proxy is compiled into `classes2.dex` and started by the app's own `Application.attachBaseContext()`, PairIP's Play licence check is disabled, and the service host points at `127.0.0.1:888`; all 19 splits re-signed with one key |
 | `output/*.apk` | the same APKs individually, for `adb install-multiple` |
+| `output/FamspaceUnlock.apk` | *optional* standalone helper (same proxy with a status screen); not needed with the build above |
 
 ### The "Get this app from the Play Store" redirect
 
@@ -85,23 +85,21 @@ Manual equivalent:
 
 ```bash
 adb uninstall com.famspace.app.android
-adb install-multiple -r output/com.famspace.app.android.apk output/config.*.apk
-adb install -r output/FamspaceUnlock.apk
-adb shell am start -n com.famspace.unlock/.MainActivity
+adb install-multiple -r output/com.famspace.app.android.apk \
+                         output/config.arm64_v8a.apk output/config.xxhdpi.apk
 ```
+
+(base + the two required splits are enough; the other 16 are optional
+language/config splits.)
 
 ### b) without adb
 
-1. copy `output/FamSpace-unlocked.xapk` **and** `output/FamspaceUnlock.apk`
-   to the phone (USB, cloud drive, whatever you use);
-2. open `FamspaceUnlock.apk` on the phone → allow "install unknown apps";
-3. install `FamSpace-unlocked.xapk` with an XAPK installer (the splits have
-   to go in together — installing them one by one fails with
-   `INSTALL_FAILED_MISSING_SPLIT`);
-4. open **Famspace Unlock** once — it starts the proxy and shows a
-   notification; leave it running;
-5. open **Famspace** — the wallet shows 999 999 999 gems/coins, Premium is
-   active, and every space item is unlocked and viewable.
+1. copy `output/FamSpace-unlocked.xapk` to the phone (USB, cloud drive, …);
+2. install it with an XAPK installer (the splits have to go in together —
+   installing them one by one fails with `INSTALL_FAILED_MISSING_SPLIT`);
+3. open **Famspace** — nothing else to do: the proxy starts with the app, the
+   wallet shows 999 999 999 gems/coins, Premium is active, and every space
+   item is unlocked and viewable.
 
 ## 3. How the app is built
 

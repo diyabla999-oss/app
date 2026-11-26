@@ -129,6 +129,34 @@ else
   bad "signature verification failed"
 fi
 
+echo "== in-app proxy"
+res=$(python3 - "$WORK" <<'EOF2'
+import sys, os, zipfile, struct
+root = sys.argv[1]
+z = zipfile.ZipFile(os.path.join(root, "com.famspace.app.android.apk"))
+d = z.read("classes2.dex")
+def uleb(d, o):
+    r = s = 0
+    while True:
+        b = d[o]; o += 1; r |= (b & 0x7f) << s
+        if not b & 0x80: return r, o
+        s += 7
+ss, so = struct.unpack_from("<II", d, 56); ts, to = struct.unpack_from("<II", d, 64)
+cs, co = struct.unpack_from("<II", d, 96)
+def st(idx):
+    off = struct.unpack_from("<I", d, so + 4*idx)[0]
+    _, off = uleb(d, off)
+    return d[off:d.index(b"\x00", off)].decode()
+def td(i): return st(struct.unpack_from("<I", d, to + 4*i)[0])
+names = [td(struct.unpack_from("<I", d, co + 32*i)[0]) for i in range(cs)]
+need = ["Lcom/famspace/unlock/LocalProxy;", "Lcom/famspace/unlock/Rules;",
+        "Lcom/famspace/unlock/ProxyHolder;", "Lcom/famspace/unlock/ProxyProvider;"]
+miss = [n for n in need if n not in names]
+print("MISSING=%s" % (";".join(miss) if miss else "none"))
+EOF2
+)
+if [ "$res" = "MISSING=none" ]; then ok "proxy classes are inside classes2.dex"; else bad "proxy classes missing: $res"; fi
+
 echo "== patches"
 (cd "$WORK" && unzip -q -o com.famspace.app.android.apk classes2.dex)
 if python3 - "$WORK/classes2.dex" <<'EOF'

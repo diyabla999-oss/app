@@ -1,0 +1,47 @@
+package com.famspace.unlock;
+
+import android.util.Log;
+
+/**
+ * Holds the one proxy instance for the whole app process.
+ *
+ * Both the Activity and the foreground Service call ensureStarted(): if the
+ * service is refused by the system (background-start restrictions, FGS type
+ * rules, ...) the proxy still runs in the app process, so Famspace keeps
+ * working as long as the helper app is alive.
+ */
+public final class ProxyHolder {
+
+    private static final String TAG = "FamUnlock";
+    private static LocalProxy proxy;
+    private static String status = "not started";
+
+    private ProxyHolder() {
+    }
+
+    public static synchronized void ensureStarted() {
+        if (proxy != null && proxy.isRunning()) {
+            status = "running on " + proxy.publicUrl();
+            return;
+        }
+        try {
+            proxy = new LocalProxy();
+            proxy.start();
+            status = "running on " + proxy.publicUrl();
+            Log.i(TAG, status);
+        } catch (Throwable t) {
+            status = "failed: " + t;
+            Log.e(TAG, "proxy failed to start", t);
+        }
+    }
+
+    public static synchronized String status() {
+        if (proxy != null && proxy.isRunning()) {
+            return "running on " + proxy.publicUrl();
+        }
+        if (proxy != null && proxy.lastError() != null) {
+            return "error: " + proxy.lastError();
+        }
+        return status;
+    }
+}

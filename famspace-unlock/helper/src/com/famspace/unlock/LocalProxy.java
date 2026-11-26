@@ -36,6 +36,7 @@ public final class LocalProxy {
     private final String[] upstream;
     private final int port;
     private final String publicUrl;
+
     private ServerSocket server;
     private volatile boolean running;
     private volatile String lastError;
@@ -54,11 +55,18 @@ public final class LocalProxy {
         return publicUrl;
     }
 
+    public boolean isRunning() {
+        return running;
+    }
+
     public String lastError() {
         return lastError;
     }
 
     public void start() throws Exception {
+        if (running) {
+            return;
+        }
         server = new ServerSocket(port, 16, InetAddress.getByName("127.0.0.1"));
         running = true;
         Thread t = new Thread(this::serve, "famunlock");
@@ -122,6 +130,18 @@ public final class LocalProxy {
             }
 
             String target = normalise(rawTarget);
+
+            // health check, so the proxy can be verified from the phone's
+            // browser: http://127.0.0.1:888/__famunlock/health
+            if (target.startsWith("/__famunlock/health")) {
+                byte[] ok = ("{\"status\":\"ok\",\"url\":\"" + publicUrl
+                        + "\",\"upstream\":\"" + upstream[0] + "\"}").getBytes(StandardCharsets.UTF_8);
+                out.write(("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+                        + ok.length + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.ISO_8859_1));
+                out.write(ok);
+                out.flush();
+                return;
+            }
             int q = target.indexOf('?');
             String path = q >= 0 ? target.substring(0, q) : target;
             String query = q >= 0 ? target.substring(q + 1) : null;
