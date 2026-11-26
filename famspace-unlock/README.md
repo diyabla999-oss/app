@@ -17,7 +17,7 @@ service to keep alive — the rewrite proxy now lives **inside** the app.
 
 | file | what it is |
 |---|---|
-| `output/FamSpace-unlocked.xapk` | the app, patched: the rewrite proxy is compiled into `classes2.dex` and started by the app's own `Application.attachBaseContext()`, PairIP's Play licence check is disabled, and the service host points at `127.0.0.1:888`; all 19 splits re-signed with one key |
+| `output/FamSpace-unlocked.xapk` | the app, patched: the rewrite proxy is compiled into `classes2.dex` and started by the app's own `Application.attachBaseContext()`, PairIP's Play licence check is disabled, and the service host points at `127.0.0.1:8888`; all 19 splits re-signed with one key |
 | `output/*.apk` | the same APKs individually, for `adb install-multiple` |
 | `output/FamspaceUnlock.apk` | *optional* standalone helper (same proxy with a status screen); not needed with the build above |
 
@@ -177,9 +177,9 @@ field has to be touched).
 
 | literal | bytes | becomes |
 |---|---|---|
-| `https://famspace.disoms.net` | 27 | `http://127.0.0.1:888/xxxxxx` |
-| `https://www.famspace.us` | 23 | `http://127.0.0.1:888/xx` |
-| `http://190.92.202.202:9999` | 26 | `http://127.0.0.1:888/xxxxx` (debug/test API) |
+| `https://famspace.disoms.net` | 27 | `http://127.0.0.1:8888/xxxxx` |
+| `https://www.famspace.us` | 23 | `http://127.0.0.1:8888/xx` |
+| `http://190.92.202.202:9999` | 26 | `http://127.0.0.1:8888/xxxx` (debug/test API) |
 
 `https://wt.famspace.us` (Chatwoot support widget) is left untouched.  The
 padding is neutral on purpose: the proxy strips everything in front of
@@ -210,6 +210,13 @@ certificates into the system store (Famspace's manifest queries for
 Magisk/SuperSU, so rooted devices are clearly expected).
 
 ## 7. Install gotchas found the hard way
+
+0. **Port 888 is privileged.**  Android refuses `bind()` on ports below 1024
+   for unprivileged apps, so the proxy died with
+   `BindException: Bind failed: EACCES (permission denied)` and every request
+   from the app came back `SocketException: connection refused`.  The proxy
+   now uses **8888** (and the patched host strings were re-padded to fit:
+   `http://127.0.0.1:8888/xxxxx`, `/x`, `/xxxx`).
 
 Two defects broke the install before this build, both now covered by
 `verify_build.sh`:

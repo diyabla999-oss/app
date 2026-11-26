@@ -22,7 +22,7 @@ XAPK="${1:?usage: build_inapp.sh <in.xapk> <patched libapp.so> <outdir> [ip] [po
 LIBAPP="${2:?missing patched libapp.so}"
 OUT="${3:?missing outdir}"
 IP="${4:-127.0.0.1}"
-PORT="${5:-888}"
+PORT="${5:-8888}"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SDK="${ANDROID_SDK:-$HOME/tools/android-sdk}"

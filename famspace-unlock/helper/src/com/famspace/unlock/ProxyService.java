@@ -18,7 +18,7 @@ import android.util.Log;
 public class ProxyService extends Service {
 
     private static final String TAG = "FamUnlock";
-    public static final int PORT = 888;
+    public static final int PORT = 8888;
 
     @Override
     public IBinder onBind(Intent intent) {

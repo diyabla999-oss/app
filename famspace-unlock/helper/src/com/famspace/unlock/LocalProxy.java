@@ -26,7 +26,9 @@ import org.json.JSONObject;
  */
 public final class LocalProxy {
 
-    public static final int DEFAULT_PORT = 888;
+    // Android refuses privileged ports (<1024) for unprivileged apps:
+    // binding 888 fails with BindException: EACCES (permission denied).
+    public static final int DEFAULT_PORT = 8888;
 
     private static final String[] UPSTREAM = {
             "https://famspace.disoms.net",
