@@ -122,6 +122,94 @@ for f in com.famspace.app.android.apk config.arm64_v8a.apk config.xxhdpi.apk; do
   if "$BT/aapt2" dump badging "$WORK/$f" >/dev/null 2>&1; then ok "$f parses"; else bad "$f does not parse"; fi
 done
 
+echo "== every APK in the set"
+res=$(python3 - "$WORK" <<'EOF'
+import sys, os, json, zipfile, subprocess
+root = sys.argv[1]
+BT = os.path.expanduser("~/tools/android-sdk/build-tools/34.0.0")
+apks = sorted(f for f in os.listdir(root) if f.endswith(".apk"))
+problems = []
+
+def badging(f):
+    try:
+        out = subprocess.run([os.path.join(BT, "aapt2"), "dump", "badging",
+                              os.path.join(root, f)],
+                             capture_output=True, text=True, timeout=120).stdout
+    except Exception as e:
+        return None, str(e)
+    pkg = ver = None
+    for line in out.splitlines():
+        if line.startswith("package:"):
+            for tok in line.split():
+                if tok.startswith("name="): pkg = tok[5:].strip("'\"")
+                if tok.startswith("versionCode="): ver = tok[12:].strip("'\"")
+    return (pkg, ver), None
+
+pkgs, vers, certs = set(), set(), set()
+for f in apks:
+    (pkg, ver), err = badging(f)
+    if err:
+        problems.append("%s: aapt2 failed (%s)" % (f, err))
+        continue
+    if pkg is None:
+        problems.append("%s: no package name" % f)
+        continue
+    pkgs.add(pkg); vers.add(ver)
+    try:
+        out = subprocess.run([os.path.join(BT, "apksigner"), "verify", "--print-certs",
+                              os.path.join(root, f)],
+                             capture_output=True, text=True, timeout=120).stdout
+    except Exception as e:
+        problems.append("%s: apksigner failed (%s)" % (f, e))
+        continue
+    d = [l.split(": ", 1)[1].strip() for l in out.splitlines()
+         if "SHA-256 digest" in l]
+    if not d:
+        problems.append("%s: no signature" % f)
+    else:
+        certs.add(d[0])
+
+if len(pkgs) > 1:  problems.append("different package names: %s" % sorted(pkgs))
+if len(vers) > 1:  problems.append("different versionCodes: %s" % sorted(vers))
+if len(certs) > 1: problems.append("different signing certificates: %s" % sorted(certs))
+
+# manifest.json must describe exactly the APKs that are in the archive
+mpath = os.path.join(root, "manifest.json")
+if os.path.exists(mpath):
+    m = json.load(open(mpath))
+    listed = [s["file"] for s in m.get("split_apks", [])]
+    for lf in listed:
+        if not os.path.exists(os.path.join(root, lf)):
+            problems.append("manifest.json lists %s but it is not in the archive" % lf)
+    extra = sorted(set(os.path.basename(a) for a in apks) - set(listed))
+    if extra:
+        problems.append("APKs not listed in manifest.json: %s" % extra)
+    if m.get("package_name") and pkgs and m["package_name"] not in pkgs:
+        problems.append("manifest.json package_name %s != %s" % (m["package_name"], sorted(pkgs)))
+else:
+    problems.append("manifest.json missing")
+
+print("COUNT=%d" % len(apks))
+print("PKG=%s" % (sorted(pkgs)[0] if pkgs else "?"))
+print("VER=%s" % (sorted(vers)[0] if vers else "?"))
+print("CERT=%s" % (sorted(certs)[0][:16] if certs else "?"))
+print("BAD=%s" % ("\n".join(problems) if problems else "none"))
+EOF
+)
+cnt=$(echo "$res" | sed -n 's/^COUNT=//p')
+echo "$res" | sed -n 's/^PKG=/       package  /p; s/^VER=/       version  /p; s/^CERT=/       signer   /p'
+badlist=$(echo "$res" | sed -n 's/^BAD=//p')
+if [ "$badlist" = "none" ]; then ok "$cnt APKs: one package, one versionCode, one signer"; else
+  bad "split set inconsistent:"; echo "$badlist" | sed 's/^/       /'
+fi
+
+echo "== signatures on every APK"
+sbad=0
+for f in "$WORK"/*.apk; do
+  if ! "$BT/apksigner" verify "$f" >/dev/null 2>&1; then bad "signature invalid: $(basename "$f")"; sbad=1; fi
+done
+[ "$sbad" = "0" ] && ok "v1+v2+v3 signatures valid on all $(ls "$WORK"/*.apk | wc -l) APKs"
+
 echo "== signatures"
 if java -jar "$HOME/tools/uber-apk-signer-1.3.0.jar" -y -a "$WORK"/com.famspace.app.android.apk "$WORK"/config.arm64_v8a.apk "$WORK"/config.xxhdpi.apk >/dev/null 2>&1; then
   ok "v1+v2+v3 signatures valid on base and splits"

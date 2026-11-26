@@ -106,7 +106,11 @@ language/config splits.)
 
 ### b) without adb
 
-1. copy `output/FamSpace-unlocked.xapk` to the phone (USB, cloud drive, …);
+0. **uninstall the original Famspace first** - the patched build is re-signed,
+   so an update over the Play install fails with
+   `INSTALL_FAILED_UPDATE_INCOMPATIBLE`;
+1. copy `output/FamSpace-unlocked.xapk` to the phone (USB, cloud drive, …) -
+   delete any older copy first, the pre-fix build does not install;
 2. install it with an XAPK installer (the splits have to go in together —
    installing them one by one fails with `INSTALL_FAILED_MISSING_SPLIT`);
 3. open **Famspace** — nothing else to do: the proxy starts with the app, the
@@ -225,13 +229,51 @@ Two defects broke the install before this build, both now covered by
    `android:extractNativeLibs="false"`, so every `.so` must be *stored
    uncompressed* and 4096-byte aligned.  Re-injecting the patched
    `libapp.so` with a plain `zip` compressed it (11.7 MB -> 4.6 MB) and the
-   installer rejected the whole APK.  The repack now uses `zip -0`.
+   installer rejected the whole APK.
 2. **dex version.**  Reassembling `classes2.dex` with smali rewrote it and
    downgraded it from dex 037 to dex 035.  The dex is now patched *in place*
    (only the first instruction of four methods is overwritten), so it keeps
    version 037, its size and all offsets.
 
 Run `./verify_build.sh output/FamSpace-unlocked.xapk` after any rebuild.
+
+### The stale copy in the download folder
+
+A third failure mode had nothing to do with the build: **the fixed XAPK was
+never copied to the download folder.**  The phone kept pulling the
+pre-fix build (02:32), whose `config.arm64_v8a.apk` still had a compressed
+`libapp.so` - so the installer rejected it with `INSTALL_FAILED_INVALID`
+("couldn't install") even though the build on disk was correct.
+
+`publish.sh` now closes that loop:
+
+```bash
+./publish.sh                    # verify -> copy output/ to pp/download -> verify again
+```
+
+It refuses to publish a build that does not pass `verify_build.sh`, and it
+re-verifies the *published* file, so the thing the phone downloads is always
+the thing that was checked.  The verifier also now checks all 20 APKs
+(one package name, one versionCode, one signing certificate, valid v1+v2+v3
+signatures, `manifest.json` describing exactly the files in the archive) -
+it previously only looked at the base APK and two splits, which is why a
+half-broken set could pass.
+
+### If the install still fails
+
+| error | cause | fix |
+|---|---|---|
+| `INSTALL_FAILED_INVALID` | a native library is compressed or misaligned | `./publish.sh`, re-download |
+| `INSTALL_FAILED_UPDATE_INCOMPATIBLE` | the Play-signed original is still installed | uninstall it first (`adb uninstall com.famspace.app.android`) |
+| `INSTALL_FAILED_MISSING_SPLIT` | the splits were installed one by one | install the whole set (`adb install-multiple`) |
+| `INSTALL_FAILED_DEXOPT` | a dex is malformed | `./verify_build.sh` |
+
+The exact reason is visible with:
+
+```bash
+adb install-multiple output/com.famspace.app.android.apk output/config.arm64_v8a.apk output/config.xxhdpi.apk
+```
+
 
 ## 8. Limits of this build
 
@@ -266,6 +308,7 @@ mitm_addon.py      same rules as a mitmproxy addon
 pool_xref.py       find code that loads a given object-pool slot
 aot_dis.py         annotate raw arm64 code the way Blutter does
 install_on_phone.sh  adb install of everything
+publish.sh          verify -> copy the build to the download folder -> verify
 ANALYSIS.md        the full REA/Blutter findings
 output/            FamSpace-unlocked.xapk, 19 signed APKs, FamspaceUnlock.apk
 ```

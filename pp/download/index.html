@@ -9,24 +9,38 @@
   a{color:#0b57d0} li{margin:5px 0}
   code{background:#f3f4f6;padding:2px 6px;border-radius:4px;font-size:13px}
   .note{background:#f6f7f9;border-left:4px solid #0b57d0;padding:10px 14px;margin:18px 0;border-radius:4px}
+  .warn{background:#fdf3f3;border-left:4px solid #c0392b;padding:10px 14px;margin:18px 0;border-radius:4px}
 </style>
 </head>
 <body>
 <h1>Famspace unlock &mdash; downloads</h1>
 
+<div class="warn">
+<b>Before you install</b><br>
+1. Uninstall the original <b>Famspace</b> (Play version). The patched build is
+   re-signed with a different key, so an update over the Play install fails
+   with <code>INSTALL_FAILED_UPDATE_INCOMPATIBLE</code>.<br>
+2. Delete any previously downloaded copy of <code>FamSpace-unlocked.xapk</code>
+   from the phone and download it again &mdash; older copies were broken and do
+   not install.<br>
+3. Install the XAPK with an XAPK installer, or push the APKs with
+   <code>adb install-multiple</code> (see below). All splits have to be
+   installed together.
+</div>
+
 <div class="note">
-<b>Install order</b><br>
-1. <code>FamspaceUnlock.apk</code> &mdash; the local rewrite proxy that runs on the phone<br>
-2. <code>FamSpace-unlocked.xapk</code> &mdash; the patched app (install with an XAPK installer, or use the APKs below with <code>adb install-multiple</code>)<br>
-3. open <b>Famspace Unlock</b> once, leave it running, then open <b>Famspace</b>
+<b>Nothing else to do</b><br>
+The rewrite proxy is compiled into the app and starts with it, so there is no
+second app to install and no service to keep running. Just install the XAPK
+and open <b>Famspace</b>.
 </div>
 
 <h2>Main files</h2>
 <ul>
-  <li><a href="FamSpace-unlocked.xapk">FamSpace-unlocked.xapk</a> &mdash; 49.5 MB &mdash; patched app, all 19 splits</li>
-  <li><a href="FamspaceUnlock.apk">FamspaceUnlock.apk</a> &mdash; 17 KB &mdash; helper app (proxy on 127.0.0.1:888)</li>
+  <li><a href="FamSpace-unlocked.xapk">FamSpace-unlocked.xapk</a> &mdash; 49.7 MB &mdash; patched app, base + 19 splits</li>
   <li><a href="README.md">README.md</a> &mdash; install &amp; usage guide</li>
   <li><a href="ANALYSIS.md">ANALYSIS.md</a> &mdash; the REA / Blutter analysis of the app</li>
+  <li><a href="FamspaceUnlock.apk">FamspaceUnlock.apk</a> &mdash; optional standalone proxy with a status screen (not needed)</li>
 </ul>
 
 <h2>Individual APKs (for <code>adb install-multiple -r</code>)</h2>
@@ -43,6 +57,8 @@
       <a href="config.ru.apk">config.ru.apk</a> &middot; <a href="config.th.apk">config.th.apk</a> &middot;
       <a href="config.tr.apk">config.tr.apk</a> &middot; <a href="config.vi.apk">config.vi.apk</a></li>
 </ul>
+
+<p><code>adb install-multiple -r com.famspace.app.android.apk config.arm64_v8a.apk config.xxhdpi.apk</code></p>
 
 <p><small>Served from the codespace on port 8080.</small></p>
 </body>

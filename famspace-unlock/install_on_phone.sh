@@ -6,9 +6,13 @@
 #
 # What it does:
 #   1. removes the original app (its signature differs from ours)
-#   2. installs all 19 Famspace APKs as one split set
-#   3. installs the "Famspace Unlock" helper (the local rewrite proxy)
-#   4. starts the helper so the proxy is up
+#   2. removes the "Famspace Unlock" helper if it is installed - the current
+#      build carries the proxy inside the app, and the helper would fight it
+#      for 127.0.0.1:8888
+#   3. installs all 19 Famspace APKs as one split set
+#
+# Pass --with-helper to keep/install the standalone helper instead (only
+# useful for the older build where the proxy lived in the helper app).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -26,18 +30,26 @@ fi
 echo "== uninstalling the original (different signature)"
 "$ADB" uninstall com.famspace.app.android || true
 
+WITH_HELPER=0
+for arg in "$@"; do [ "$arg" = "--with-helper" ] && WITH_HELPER=1; done
+
+if [ "$WITH_HELPER" = "1" ]; then
+  echo "== installing the local proxy helper"
+  "$ADB" install -r "$OUT/FamspaceUnlock.apk"
+  echo "== starting the helper"
+  "$ADB" shell am start -n com.famspace.unlock/.MainActivity >/dev/null
+  sleep 2
+else
+  echo "== removing the helper (the proxy now lives inside the app)"
+  "$ADB" uninstall com.famspace.unlock >/dev/null 2>&1 && echo "   removed" || echo "   not installed"
+fi
+
 echo "== installing the patched split set"
 "$ADB" install-multiple -r "$OUT"/com.famspace.app.android.apk "$OUT"/config.*.apk
-
-echo "== installing the local proxy helper"
-"$ADB" install -r "$OUT/FamspaceUnlock.apk"
-
-echo "== starting the helper"
-"$ADB" shell am start -n com.famspace.unlock/.MainActivity >/dev/null
-sleep 2
 
 echo "== state"
 "$ADB" shell pm list packages | grep -E "famspace" || true
 echo
-echo "Now open Famspace.  Keep 'Famspace Unlock' running (its notification"
-echo "keeps the proxy alive); the app talks to 127.0.0.1:888 on the phone."
+echo "Now open Famspace.  The proxy starts inside the app on 127.0.0.1:8888."
+echo "If the install fails with INSTALL_FAILED_UPDATE_INCOMPATIBLE, the Play"
+echo "version is still installed - uninstall it and run this script again."
