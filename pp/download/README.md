@@ -33,8 +33,12 @@ The app declares **PairIP** as its Application class:
 `com.pairip.licensecheck` asks the Play licensing service whether the build
 came from Play.  A re-signed build does not, so PairIP shows its error dialog
 or opens the Play Store paywall and kills the app — that is the redirect you
-saw one second after launch.  `patch_license.sh` neutralises it by editing the
-smali of `classes2.dex` only:
+saw one second after launch.  `patch_license.sh` neutralises it by patching `classes2.dex` **in place** -
+only the first instruction of the four methods is overwritten with
+`return-void`, so the dex keeps its version (037), its size and every
+internal offset (only the adler32 checksum and the sha1 signature are
+refreshed).  Reassembling the dex with smali would rewrite all of it and
+downgrade it to dex 035, which the package installer rejects:
 
 ```
 LicenseClient.checkLicense(Context)          -> return immediately
@@ -217,7 +221,7 @@ Magisk/SuperSU, so rooted devices are clearly expected).
 
 ```
 patch_libapp.py    equal-length host rewrite for libapp.so
-patch_pairip.py    neutralise PairIP's Play licence check (smali)
+patch_dex.py       neutralise PairIP's Play licence check (in-place dex patch)
 patch_license.sh   decode -> patch PairIP -> reassemble -> swap classes2.dex
 build_apk.sh       inject -> re-sign all splits -> repack the XAPK
 build_helper.sh    build the on-device helper APK (aapt2 + d8 + apksigner)
