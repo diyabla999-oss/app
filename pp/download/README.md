@@ -331,17 +331,30 @@ adb install-multiple output/com.famspace.app.android.apk output/config.arm64_v8a
 ### If the wallet still shows the real balance
 
 The proxy rewrites the server's answers, so the balance the app shows is the
-rewritten one.  The log says exactly what happened:
+rewritten one.  **The proxy runs inside the app process** — nothing listens on
+`127.0.0.1` until the app is running, so open the app first, then the log:
 
 ```bash
-# on the phone's browser
-http://127.0.0.1:8888/__famunlock/log        # or :8888
+# on the phone's browser, while Famspace is running
+http://127.0.0.1:8888/__famunlock/log        # or :888 on a rooted device
 http://127.0.0.1:8888/__famunlock/health      # which ports are up
 ```
 
+The first line of the log page is always a banner:
+
+```
+FamUnlock proxy build 2026-11-26-wallet2  listening on ports 8888,888
+```
+
+If that banner is missing, an **old build** is still installed (the one
+before the diagnostics used port 888 and logged nothing) — uninstall it and
+install the current file.  The log format is the tell: the current build
+prints the content type in brackets, `POST /api/v1/me/profile -> 200 (424
+bytes) [application/json; charset=utf-8]`.
+
 | log line | meaning |
 |---|---|
-| `rewrote /api/v1/me/profile: [gems, coins, …]` | the rewrite fired; the following `body …` line shows the raw server answer, so the field names are visible |
+| `rewrote /api/v1/me/profile: [gems, coins, …]` | the rewrite fired; `app sees …` shows the JSON the app actually receives, `body …` the raw server answer |
 | `no rule matched /api/v1/me/profile` | the answer arrived but carried no known wallet field — the `body …` line shows what the server actually sent |
 | `not json …` / `body is not a JSON object …` | the answer was not plain JSON — the snippet shows what came back |
 

@@ -26,6 +26,14 @@ import org.json.JSONObject;
  */
 public final class LocalProxy {
 
+    /**
+     * Identifies the running build.  It is printed at the top of the log page
+     * and in the health answer, so it is always visible which proxy is
+     * serving a request - an old build without this marker cannot be told
+     * apart from a new one that simply has nothing to log.
+     */
+    public static final String BUILD_ID = "2026-11-26-wallet2";
+
     // Android refuses privileged ports (<1024) for unprivileged apps:
     // binding 888 fails with BindException: EACCES (permission denied).
     public static final int DEFAULT_PORT = 8888;
@@ -118,6 +126,7 @@ public final class LocalProxy {
             t.setDaemon(false);
             t.start();
         }
+        record("FamUnlock proxy build " + BUILD_ID + " started on ports " + ports());
     }
 
     /** The ports the proxy is listening on. */
@@ -195,6 +204,10 @@ public final class LocalProxy {
             // http://127.0.0.1:888/__famunlock/log
             if (target.startsWith("/__famunlock/log")) {
                 StringBuilder sb = new StringBuilder();
+                // the banner is regenerated on every read, so the page always
+                // says which build is serving it
+                sb.append("FamUnlock proxy build ").append(BUILD_ID)
+                        .append("  listening on ports ").append(ports()).append('\n');
                 synchronized (log) {
                     for (String entry : log) {
                         sb.append(entry).append('\n');
@@ -211,7 +224,8 @@ public final class LocalProxy {
             // health check, so the proxy can be verified from the phone's
             // browser: http://127.0.0.1:888/__famunlock/health
             if (target.startsWith("/__famunlock/health")) {
-                byte[] ok = ("{\"status\":\"ok\",\"url\":\"" + publicUrl
+                byte[] ok = ("{\"status\":\"ok\",\"build\":\"" + BUILD_ID
+                        + "\",\"url\":\"" + publicUrl
                         + "\",\"ports\":\"" + ports()
                         + "\",\"upstream\":\"" + upstream[0] + "\"}").getBytes(StandardCharsets.UTF_8);
                 out.write(("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
@@ -268,6 +282,11 @@ public final class LocalProxy {
                         if (!keys.isEmpty()) {
                             payload = doc.toString().getBytes(StandardCharsets.UTF_8);
                             record("   rewrote " + path + ": " + keys);
+                            // what the app actually receives - this is the
+                            // answer to "what does the phone see"
+                            String rewritten = new String(payload, StandardCharsets.UTF_8);
+                            record("   app sees " + path + ": "
+                                    + rewritten.substring(0, Math.min(600, rewritten.length())));
                         } else {
                             record("   no rule matched " + path);
                         }

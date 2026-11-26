@@ -46,12 +46,19 @@ open <b>Famspace</b> and it works.
 
 <div class="note">
 <b>Check the wallet</b><br>
-After logging in, open <code>http://127.0.0.1:8888/__famunlock/log</code> in the
-phone's browser (both :888 and :8888 are served). The log shows, for every
-answer, which fields the proxy rewrote and the raw body of anything that
-mentions <code>coin</code>/<code>gem</code>/<code>vip</code> &mdash; so the
-server's exact field names are visible. <a href="VERIFY.txt">VERIFY.txt</a>
-explains what to look for.
+<strong>Open the app first</strong> &mdash; the proxy runs inside the app
+process, so nothing listens on <code>127.0.0.1</code> until the app is
+running. Then open
+<code>http://127.0.0.1:8888/__famunlock/log</code> in the phone's browser.
+<br>
+The first line is always a banner:
+<code>FamUnlock proxy build 2026-11-26-wallet2 &nbsp;listening on ports
+8888,888</code>. If it is missing, an old build is still installed.
+<br>
+The log then shows, for every answer, which fields the proxy rewrote and the
+raw body of anything that mentions <code>coin</code>/<code>gem</code>/<code>vip</code>
+&mdash; so the server's exact field names are visible.
+<a href="VERIFY.txt">VERIFY.txt</a> explains what to look for.
 </div>
 
 <h2>Main files</h2>

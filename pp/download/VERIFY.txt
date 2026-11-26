@@ -1,61 +1,64 @@
 Famspace unlock - install checklist
 ====================================
 
-Published build (verified by famspace-unlock/verify_build.sh + verify_apk.sh):
-  md5 / sha256 of every file are below.
-
 Install (simplest):
-  1. uninstall the original Famspace (Play version) - the patched build has a
-     different signature, installing over it fails with
-     INSTALL_FAILED_UPDATE_INCOMPATIBLE
-  2. delete any older copy of the app from the phone
-  3. tap Famspace-universal.apk to install it - one file, no XAPK installer,
-     no splits, no second app
-  4. open Famspace - the proxy starts inside the app, nothing else to do
+  1. uninstall the current Famspace completely (long-press -> uninstall, or
+     "adb uninstall com.famspace.app.android") - a half-updated install can
+     keep the old proxy code
+  2. delete the previously downloaded APK/XAPK from the phone
+  3. install Famspace-universal.apk (one file, no XAPK installer, no splits)
+     or FamSpace-unlocked.xapk with an XAPK installer
+  4. OPEN THE APP and leave it in the foreground for a moment
 
-Install (XAPK instead):
-     adb install-multiple -r com.famspace.app.android.apk config.arm64_v8a.apk config.xxhdpi.apk
+  The rewrite proxy runs INSIDE the app process, so nothing listens on
+  127.0.0.1 until the app is running. Open the app first, then the log URL.
 
-If it still fails, adb prints the exact reason, e.g.
-  INSTALL_FAILED_INVALID          -> a .so was compressed (wrong file)
-  INSTALL_FAILED_UPDATE_INCOMPATIBLE -> the original app is still installed
-  INSTALL_FAILED_MISSING_SPLIT    -> the splits were not installed together
+Checking the build and the wallet
+---------------------------------
+Open this in the phone's browser (while the app is running):
 
-
-Wallet check (why the balance may still look wrong)
----------------------------------------------------
-The proxy rewrites the server's answers.  After logging in, open this in the
-phone's browser:
-
-     http://127.0.0.1:8888/__famunlock/log        (or :8888/__famunlock/log)
+     http://127.0.0.1:8888/__famunlock/log
      http://127.0.0.1:8888/__famunlock/health
 
-Both ports are served - 8888 is the one the app talks to, 888 is the legacy
-port (only bindable on rooted devices).
+The FIRST line of the log page is always a banner:
 
-In the log, look at the line for the profile:
+     FamUnlock proxy build 2026-11-26-wallet2  listening on ports 8888,888
+
+  * banner present  -> this is the current build, the diagnostics below apply
+  * no banner       -> an OLD build is still installed (it used port 888 and
+                       has no diagnostics). Uninstall it and install the
+                       current file.
+
+8888 is the port the app talks to. 888 is the legacy port and only binds on
+devices that allow privileged ports, so on a normal phone use 8888.
+
+What the log says about the wallet:
 
   "rewrote /api/v1/me/profile: [gems, coins, ...]"
-      the rewrite DID fire; the next line ("body /api/v1/me/profile: {...}")
-      shows the raw server answer, so the exact field names are visible
+      the rewrite fired.  The next line ("app sees ...") shows the JSON the
+      app actually receives.
   "no rule matched /api/v1/me/profile"
-      the answer arrived but no known wallet field was in it - the body line
-      shows what the server actually sent
+      the answer arrived but carried no known wallet field - the
+      "body ..." line shows what the server actually sent.
   "not json ..." / "body is not a JSON object ..."
-      the answer was not plain JSON - the snippet shows what came back
+      the answer was not plain JSON - the snippet shows what came back.
 
 Every answer that mentions coin/gem/vip/premium is logged with its body, so
 the wallet can be traced in any response, not only in the profile.
 
+If it refuses to install, adb prints the exact reason:
+  INSTALL_FAILED_INVALID          -> a .so was compressed (wrong file)
+  INSTALL_FAILED_UPDATE_INCOMPATIBLE -> the Play version is still installed
+  INSTALL_FAILED_MISSING_SPLIT    -> the splits were not installed together
 
 Digests of the published files:
 
-f478019cc1cef9e95ce255d373ab0945  Famspace-universal.apk
-77aafbae52c6edf87bcef623cebe766a  FamSpace-unlocked.xapk
-efc819ea3fd00dee9e4d6a129eeba227  com.famspace.app.android.apk
-dcb1e7c94a43f0148058bb0038eee1f2  config.arm64_v8a.apk
+80a32501b1a5547f146e0db232aa0dd7  Famspace-universal.apk
+599a77548649537180d427238ada9917  FamSpace-unlocked.xapk
+455455fc202d4028deeab419d2e69e44  com.famspace.app.android.apk
+692e70186e47f0e9f85b2ca1f80d25a1  config.arm64_v8a.apk
 6af2fccef9636f5b4c48db8f94cab6e8  config.xxhdpi.apk
-cbd0ded3c4c53a1bbc1e60fd58abedd7  FamspaceUnlock.apk
+46386d0fb16d4751d2b2f0e46476c50c  FamspaceUnlock.apk
 
-9d24e14fa9d3a732ac00233d8eea90ff53513e57c4f763a05866295bbb897fdd  Famspace-universal.apk
-49c44421b8222094bdad2a436be68a126e6fbfd2e7cc2cd46757de17d25c658f  FamSpace-unlocked.xapk
+a8c8f34291d4245268bd48785a0f85fb51388d171b33a3965e7a53e8643d6934  Famspace-universal.apk
+285991be3c3ce2d2c5ac9ed3dbfdbf3cb90e8ad4f243131644fcfee11b2bcf4d  FamSpace-unlocked.xapk
