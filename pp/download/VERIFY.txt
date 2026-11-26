@@ -1,6 +1,10 @@
 Famspace unlock - install checklist
 ====================================
 
+The XAPK is stored uncompressed and laid out exactly like the one from the
+Play Store (base APK first, manifest.json last) - some XAPK installers read
+the entries straight out of the archive and refuse a compressed one.
+
 Install (simplest):
   1. uninstall the current Famspace completely (long-press -> uninstall, or
      "adb uninstall com.famspace.app.android") - a half-updated install can

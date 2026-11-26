@@ -93,7 +93,14 @@ EOF
 XAPK_OUT="$OUTDIR/$(basename "${XAPK%.xapk}")-unlocked.xapk"
 rm -f "$XAPK_OUT"
 cd "$XPACK"
-zip -q -X "$XAPK_OUT" manifest.json icon.png *.apk
+# The Play XAPK stores every entry UNCOMPRESSED and puts manifest.json last.
+# Some XAPK installers read the APKs straight out of the archive, so the
+# layout has to be reproduced exactly - a deflated XAPK installs on some
+# devices and fails with "couldn't install" on others.
+ORDER="com.famspace.app.android.apk icon.png"
+for apk in config.*.apk; do ORDER="$ORDER $apk"; done
+ORDER="$ORDER manifest.json"
+zip -q -X -0 "$XAPK_OUT" $ORDER
 cp "$XPACK"/*.apk "$OUTDIR"/ 2>/dev/null || true
 cp manifest.json icon.png "$OUTDIR"/ 2>/dev/null || true
 echo "== $XAPK_OUT"

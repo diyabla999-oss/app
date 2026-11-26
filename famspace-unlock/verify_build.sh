@@ -38,6 +38,32 @@ done
 n=$(ls "$WORK"/*.apk | wc -l)
 note "$n APKs in the set"
 
+echo "== xapk layout (some installers need the entries stored, manifest.json last)"
+res=$(python3 - "$XAPK" <<'EOF'
+import sys, zipfile
+z = zipfile.ZipFile(sys.argv[1])
+infos = z.infolist()
+deflated = [i.filename for i in infos if i.compress_type != 0]
+last = infos[-1].filename if infos else ""
+first = infos[0].filename if infos else ""
+print("DEFLATED=%s" % ("\n".join(deflated) if deflated else "none"))
+print("FIRST=%s" % first)
+print("LAST=%s" % last)
+EOF
+)
+defl=$(echo "$res" | sed -n 's/^DEFLATED=//p')
+first=$(echo "$res" | sed -n 's/^FIRST=//p')
+last=$(echo "$res" | sed -n 's/^LAST=//p')
+if [ "$defl" = "none" ]; then ok "every entry is stored uncompressed"; else
+  bad "entries are compressed - some XAPK installers fail on that:"; echo "$defl" | sed 's/^/       /'
+fi
+if [ "$last" = "manifest.json" ]; then ok "manifest.json is the last entry"; else
+  bad "last entry is '$last' (the Play XAPK has manifest.json last)"
+fi
+if [ "$first" = "com.famspace.app.android.apk" ]; then ok "the base APK is the first entry"; else
+  bad "first entry is '$first' (the Play XAPK has the base APK first)"
+fi
+
 echo "== native libraries (extractNativeLibs=false -> must be stored + aligned)"
 python3 - "$WORK" <<'EOF'
 import sys, os, zipfile, struct

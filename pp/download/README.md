@@ -328,6 +328,40 @@ The exact reason is visible with:
 adb install-multiple output/com.famspace.app.android.apk output/config.arm64_v8a.apk output/config.xxhdpi.apk
 ```
 
+### Why the balance needed all this
+
+The API does not answer with plain JSON.  Every answer is
+
+```json
+{"success":true,"code":200,"responseData":"<encrypted, base64>","t":1795723924}
+```
+
+The wallet lives inside the **encrypted** payload, so rewriting it by field
+name can never work — that is why the balance stayed at 50 whatever the
+rules said.  The proxy now
+
+1. **learns the AES key from the traffic** — the server hands it out in the
+   clear (config, `device/install`), or it is derived from the bearer token;
+   every candidate is checked against the encrypted payloads, and the one
+   that really decrypts them is kept;
+2. **decrypts** the payload,
+3. **rewrites** the wallet (`gems`/`coins` → 999999999, `vipLv` → 99,
+   `canView` → true, costs → 0, …) and
+4. **encrypts it again** — with the same IV/nonce, so the app decrypts it
+   exactly as it would the original.
+
+`Crypto.java` knows the layouts the `encrypt` package produces
+(`[IV][ciphertext]`, `[1][IV][ciphertext]`, `[nonce][ct][tag]`) for
+CBC / CTR / GCM, and `test_crypto_proxy.sh` proves the whole loop against a
+fake API that answers exactly like Famspace: the client ends up seeing
+`gems=999999999` inside a correctly re-encrypted payload.
+
+The key is *not* a literal in the binary: 105 million key candidates (every
+offset of `libapp.so`, every printable/hex/base64 form, plus SHA-256/MD5
+derivations) were tried against the captured payload and none decrypted it.
+It is assembled at runtime or handed out by the server — which is why the
+proxy learns it from the traffic instead of from the binary.
+
 ### If the wallet still shows the real balance
 
 The proxy rewrites the server's answers, so the balance the app shows is the
@@ -354,12 +388,15 @@ bytes) [application/json; charset=utf-8]`.
 
 | log line | meaning |
 |---|---|
-| `rewrote /api/v1/me/profile: [gems, coins, …]` | the rewrite fired; `app sees …` shows the JSON the app actually receives, `body …` the raw server answer |
-| `no rule matched /api/v1/me/profile` | the answer arrived but carried no known wallet field — the `body …` line shows what the server actually sent |
-| `not json …` / `body is not a JSON object …` | the answer was not plain JSON — the snippet shows what came back |
+| `learned the API key (AES/CTR/NoPadding[…])` | the key was found — from here on the wallet is rewritten |
+| `decrypted responseData: {…}` | what the server really sent |
+| `decrypted rewrite: [gems, coins, vipLv, …]` | what the proxy changed inside the encrypted payload |
+| `re-encrypted responseData` | the answer was encrypted again and handed to the app |
+| `payload is encrypted (…) and the key is still unknown` | the key could not be derived from the traffic — every request and answer is in the log, so it can be worked out from that |
+| `no rule matched /api/v1/me/profile` | a plain answer without any known wallet field — the `body …` line shows what the server sent |
 
-Every answer that mentions `coin`/`gem`/`vip`/`premium` is logged with its
-body, so the wallet can be traced in any response, not only in the profile.
+Every request (with its headers) and every answer (with its body) is in the
+log, so nothing has to be guessed.
 
 The rules cover `coins`, `gems`, `balance` and the usual variants
 (`coin`, `availableCoins`, `totalGems`, `points`, …); costs (`coinsRequired`,
