@@ -17,9 +17,34 @@ no MITM CA**:
 
 | file | what it is |
 |---|---|
-| `output/FamSpace-unlocked.xapk` | the app, patched: its service host now points at `127.0.0.1:888`, all 19 splits re-signed with one key |
+| `output/FamSpace-unlocked.xapk` | the app, patched: PairIP's Play licence check neutralised **and** its service host points at `127.0.0.1:888`; all 19 splits re-signed with one key |
 | `output/FamspaceUnlock.apk` | a tiny helper app that runs the rewrite proxy **inside the phone** (foreground service, 127.0.0.1:888) |
 | `output/*.apk` | the same APKs individually, for `adb install-multiple` |
+
+### The "Get this app from the Play Store" redirect
+
+The app declares **PairIP** as its Application class:
+
+```xml
+<application android:name="com.pairip.application.Application">
+    -> attachBaseContext() -> LicenseClient.checkLicense(context)
+```
+
+`com.pairip.licensecheck` asks the Play licensing service whether the build
+came from Play.  A re-signed build does not, so PairIP shows its error dialog
+or opens the Play Store paywall and kills the app — that is the redirect you
+saw one second after launch.  `patch_license.sh` neutralises it by editing the
+smali of `classes2.dex` only:
+
+```
+LicenseClient.checkLicense(Context)          -> return immediately
+LicenseClient.scheduleAppShutdown()          -> return immediately  (never kill the app)
+LicenseResponseHelper.validateResponse(...)  -> return immediately  (no signature check)
+LicenseActivity.onStart()                    -> finish() immediately (no dialog, no paywall)
+```
+
+Everything else in the APK (resources, manifest, the other five dex files,
+the native libs) stays byte-identical.
 
 The helper forwards every request to the real Famspace service — keeping the
 app's own auth/device/signature headers, so the server still accepts them —
@@ -182,6 +207,9 @@ Magisk/SuperSU, so rooted devices are clearly expected).
   from here.
 * The original app must be uninstalled first (the signature changed), so the
   app's local data is gone — log in again.
+* The Play Store redirect is gone: `LicenseClient.checkLicense()` returns
+  immediately, so PairIP never asks the licensing service and never opens the
+  paywall.  The app still runs its own Play Billing flow for real purchases.
 * Only the arm64 split carries `libapp.so`; the other splits only need to be
   re-signed with the same key.
 
@@ -189,6 +217,8 @@ Magisk/SuperSU, so rooted devices are clearly expected).
 
 ```
 patch_libapp.py    equal-length host rewrite for libapp.so
+patch_pairip.py    neutralise PairIP's Play licence check (smali)
+patch_license.sh   decode -> patch PairIP -> reassemble -> swap classes2.dex
 build_apk.sh       inject -> re-sign all splits -> repack the XAPK
 build_helper.sh    build the on-device helper APK (aapt2 + d8 + apksigner)
 helper/src/…       the helper app (LocalProxy, Rules, ProxyService, MainActivity)
