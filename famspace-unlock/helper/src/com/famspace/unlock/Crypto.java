@@ -157,7 +157,28 @@ public final class Crypto {
             out.add(new Combo("AES/GCM/NoPadding", 0, 12, len - 12));
             out.add(new Combo("AES/GCM/NoPadding", 1, 13, len - 13));
         }
+        // the IV/nonce derived from the key instead of taken from the blob
+        if (len > 16) {
+            out.add(new Combo("AES/CTR/NoPadding", -2, 0, len));
+            out.add(new Combo("AES/CBC/NoPadding", -2, 0, len));
+        }
         return out;
+    }
+
+    /** the IV for a layout: -1 = none, -2 = derived from the key */
+    private static byte[] ivOf(byte[] key, byte[] blob, Combo c) {
+        if (c.ivOffset == -1) {
+            return null;
+        }
+        if (c.ivOffset == -2) {
+            byte[] iv = new byte[16];
+            System.arraycopy(key, 0, iv, 0, Math.min(16, key.length));
+            return iv;
+        }
+        int ivLen = c.mode.startsWith("AES/GCM") ? 12 : 16;
+        byte[] iv = new byte[ivLen];
+        System.arraycopy(blob, c.ivOffset, iv, 0, ivLen);
+        return iv;
     }
 
     /**
@@ -168,17 +189,13 @@ public final class Crypto {
     public static byte[] decrypt(byte[] key, byte[] blob, Combo c) {
         try {
             Cipher cipher = Cipher.getInstance(c.mode);
-            int ivLen = c.mode.startsWith("AES/GCM") ? 12 : 16;
-            if (c.mode.startsWith("AES/ECB")) {
+            byte[] iv = ivOf(key, blob, c);
+            if (iv == null) {
                 cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(key, "AES"));
             } else if (c.mode.startsWith("AES/GCM")) {
-                byte[] nonce = new byte[ivLen];
-                System.arraycopy(blob, c.ivOffset, nonce, 0, ivLen);
                 cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(key, "AES"),
-                        new GCMParameterSpec(128, nonce));
+                        new GCMParameterSpec(128, iv));
             } else {
-                byte[] iv = new byte[ivLen];
-                System.arraycopy(blob, c.ivOffset, iv, 0, ivLen);
                 cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(key, "AES"),
                         new IvParameterSpec(iv));
             }
@@ -198,22 +215,18 @@ public final class Crypto {
     public static byte[] encrypt(byte[] key, byte[] blob, Combo c, byte[] plain) {
         try {
             Cipher cipher = Cipher.getInstance(c.mode);
-            int ivLen = c.mode.startsWith("AES/GCM") ? 12 : 16;
-            if (c.mode.startsWith("AES/ECB")) {
+            byte[] iv = ivOf(key, blob, c);
+            if (iv == null) {
                 cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key, "AES"));
             } else if (c.mode.startsWith("AES/GCM")) {
-                byte[] nonce = new byte[ivLen];
-                System.arraycopy(blob, c.ivOffset, nonce, 0, ivLen);
                 cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key, "AES"),
-                        new GCMParameterSpec(128, nonce));
+                        new GCMParameterSpec(128, iv));
             } else {
-                byte[] iv = new byte[ivLen];
-                System.arraycopy(blob, c.ivOffset, iv, 0, ivLen);
                 cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key, "AES"),
                         new IvParameterSpec(iv));
             }
             byte[] ct = cipher.doFinal(plain);
-            int head = Math.min(c.ctOffset, blob.length);
+            int head = c.ctOffset > 0 ? Math.min(c.ctOffset, blob.length) : 0;
             byte[] out = new byte[head + ct.length];
             System.arraycopy(blob, 0, out, 0, head);
             System.arraycopy(ct, 0, out, head, ct.length);
@@ -267,5 +280,143 @@ public final class Crypto {
     /** the plaintext of a successful decryption, as text */
     public static String text(byte[] plain) {
         return plain == null ? null : new String(plain, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Key candidates derived from the session token.
+     *
+     * The cipher is deterministic (the same answer gives the same bytes) but
+     * the keystream changes with the session, so the key is derived from the
+     * bearer token the app sends in the Authorization header - the server
+     * knows it as well.
+     */
+    public static List<byte[]> tokenCandidates(String authValue, String uuid) {
+        List<byte[]> out = new ArrayList<byte[]>();
+        if (authValue == null) {
+            return out;
+        }
+        String token = authValue.trim();
+        int sp = token.indexOf(' ');
+        if (sp >= 0) {
+            token = token.substring(sp + 1).trim();
+        }
+        byte[] raw = token.getBytes(StandardCharsets.UTF_8);
+
+        add(out, sha256(raw));
+        add(out, md5(raw));
+        add(out, sha256(token.getBytes(StandardCharsets.US_ASCII)));
+        add(out, md5(token.getBytes(StandardCharsets.US_ASCII)));
+
+        // the token itself may be base64 / hex encoded key material
+        byte[] dec = decodeBase64(token);
+        if (dec != null) {
+            add(out, sha256(dec));
+            add(out, md5(dec));
+            if (dec.length >= 16) {
+                add(out, java.util.Arrays.copyOf(dec, 16));
+            }
+            if (dec.length >= 32) {
+                add(out, java.util.Arrays.copyOf(dec, 32));
+            }
+        }
+        // a JWT: header.payload.signature - every part is a candidate
+        String[] parts = token.split("\\.");
+        for (String p : parts) {
+            byte[] pb = decodeBase64(p);
+            if (pb != null) {
+                add(out, sha256(pb));
+                add(out, md5(pb));
+                if (pb.length >= 16) {
+                    add(out, java.util.Arrays.copyOf(pb, 16));
+                }
+                if (pb.length >= 32) {
+                    add(out, java.util.Arrays.copyOf(pb, 32));
+                }
+            }
+            byte[] pb2 = p.getBytes(StandardCharsets.US_ASCII);
+            add(out, md5(pb2));
+            add(out, sha256(pb2));
+            // hex encoded
+            if (p.length() == 32 || p.length() == 64) {
+                try {
+                    byte[] h = new byte[p.length() / 2];
+                    for (int i = 0; i < h.length; i++) {
+                        h[i] = (byte) Integer.parseInt(p.substring(2 * i, 2 * i + 2), 16);
+                    }
+                    add(out, h);
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        // combined with the per request uuid
+        if (uuid != null) {
+            byte[] u = uuid.getBytes(StandardCharsets.US_ASCII);
+            add(out, md5(concat(raw, u)));
+            add(out, sha256(concat(raw, u)));
+            add(out, md5(concat(u, raw)));
+            add(out, sha256(concat(u, raw)));
+        }
+        // slices of the token itself
+        byte[] ascii = token.getBytes(StandardCharsets.US_ASCII);
+        for (int len : new int[]{16, 24, 32}) {
+            if (ascii.length > len) {
+                add(out, java.util.Arrays.copyOf(ascii, len));
+                add(out, java.util.Arrays.copyOfRange(ascii, ascii.length - len, ascii.length));
+            }
+        }
+        return out;
+    }
+
+    /** describes the shape of a bearer token without revealing it */
+    public static String describeToken(String authValue) {
+        if (authValue == null) {
+            return "none";
+        }
+        String token = authValue.trim();
+        int sp = token.indexOf(' ');
+        if (sp >= 0) {
+            token = token.substring(sp + 1).trim();
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append(token.length()).append(" chars");
+        String[] parts = token.split("\\.");
+        sb.append(", ").append(parts.length).append(" dot separated part(s)");
+        for (int i = 0; i < parts.length; i++) {
+            byte[] dec = decodeBase64(parts[i]);
+            sb.append(", part").append(i).append("=").append(parts[i].length()).append(" chars");
+            if (dec != null) {
+                sb.append(" -> ").append(dec.length).append(" bytes");
+                // the JWT header is not secret
+                if (i == 0 && dec.length < 400) {
+                    String h = new String(dec, StandardCharsets.UTF_8);
+                    if (h.trim().startsWith("{")) {
+                        sb.append(" ").append(h);
+                    }
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    private static byte[] concat(byte[] a, byte[] b) {
+        byte[] r = new byte[a.length + b.length];
+        System.arraycopy(a, 0, r, 0, a.length);
+        System.arraycopy(b, 0, r, a.length, b.length);
+        return r;
+    }
+
+    private static void add(List<byte[]> out, byte[] b) {
+        if (b == null) {
+            return;
+        }
+        if (b.length != 16 && b.length != 24 && b.length != 32) {
+            return;
+        }
+        for (byte[] e : out) {
+            if (java.util.Arrays.equals(e, b)) {
+                return;
+            }
+        }
+        out.add(b);
     }
 }

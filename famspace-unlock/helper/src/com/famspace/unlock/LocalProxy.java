@@ -33,7 +33,7 @@ public final class LocalProxy {
      * serving a request - an old build without this marker cannot be told
      * apart from a new one that simply has nothing to log.
      */
-    public static final String BUILD_ID = "2026-11-26-wallet3";
+    public static final String BUILD_ID = "2026-11-26-wallet4";
 
     // Android refuses privileged ports (<1024) for unprivileged apps:
     // binding 888 fails with BindException: EACCES (permission denied).
@@ -304,7 +304,8 @@ public final class LocalProxy {
                         JSONObject doc = new JSONObject(text);
                         // the API ships its payload encrypted -> decrypt it,
                         // rewrite the wallet and encrypt it again
-                        doc = handleEncrypted(doc, headers, text);
+                        doc = handleEncrypted(doc, headers, text,
+                                body == null ? null : new String(body, StandardCharsets.UTF_8));
                         java.util.List<String> keys = Rules.rewrite(doc, publicUrl);
                         if (!keys.isEmpty()) {
                             record("    rewrote: " + keys);
@@ -355,12 +356,14 @@ public final class LocalProxy {
      * When one really decrypts them, the proxy keeps it and from then on
      * decrypts, rewrites and re-encrypts every answer.
      */
-    private JSONObject handleEncrypted(JSONObject doc, Map<String, String> headers, String rawText) {
+    private JSONObject handleEncrypted(JSONObject doc, Map<String, String> headers, String rawText,
+                                       String reqBody) {
         try {
             // 1) ALWAYS harvest key material - the server may hand out the key
             //    in one answer (config, device/install) while the encrypted
             //    payload comes in another one
             List<byte[]> cands = keyCandidates(headers, doc, rawText);
+            cands.addAll(bodyCandidates(reqBody));
             synchronized (knownKeys) {
                 for (byte[] c : cands) {
                     boolean seen = false;
@@ -457,6 +460,76 @@ public final class LocalProxy {
         return doc;
     }
 
+    /**
+     * The request body carries the per request material in the clear:
+     *
+     *   anm=famspace&ver=1.0.8&uuid=<uuid>&request_data=<enc>&sign=<md5 hex>
+     *
+     * The sign is 32 hex characters - 16 bytes, exactly an AES-128 key - and
+     * the uuid is a per request nonce.  Both are candidates.
+     */
+    private List<byte[]> bodyCandidates(String reqBody) {
+        List<byte[]> out = new ArrayList<byte[]>();
+        if (reqBody == null) {
+            return out;
+        }
+        String uuid = field(reqBody, "uuid");
+        String sign = field(reqBody, "sign");
+        String data = field(reqBody, "request_data");
+        if (uuid != null) {
+            byte[] u = uuid.getBytes(StandardCharsets.UTF_8);
+            out.add(Crypto.md5(u));
+            out.add(Crypto.sha256(u));
+            out.addAll(Crypto.tokenCandidates(uuid, null));
+        }
+        if (sign != null && sign.length() == 32) {
+            try {
+                byte[] h = new byte[16];
+                for (int i = 0; i < 16; i++) {
+                    h[i] = (byte) Integer.parseInt(sign.substring(2 * i, 2 * i + 2), 16);
+                }
+                out.add(h);
+            } catch (Exception ignored) {
+            }
+            byte[] a = sign.getBytes(StandardCharsets.US_ASCII);
+            out.add(Crypto.md5(a));
+            out.add(Crypto.sha256(a));
+        }
+        if (uuid != null && sign != null) {
+            byte[] both = (uuid + sign).getBytes(StandardCharsets.UTF_8);
+            out.add(Crypto.md5(both));
+            out.add(Crypto.sha256(both));
+        }
+        if (data != null) {
+            byte[] d = Crypto.decodeBase64(data);
+            if (d != null) {
+                out.add(Crypto.md5(d));
+                out.add(Crypto.sha256(d));
+                if (d.length >= 16) {
+                    out.add(java.util.Arrays.copyOf(d, 16));
+                }
+                if (d.length >= 32) {
+                    out.add(java.util.Arrays.copyOf(d, 32));
+                }
+            }
+        }
+        return out;
+    }
+
+    /** reads one field out of an url encoded body */
+    private static String field(String body, String name) {
+        try {
+            for (String part : body.split("&")) {
+                int eq = part.indexOf('=');
+                if (eq > 0 && part.substring(0, eq).equals(name)) {
+                    return java.net.URLDecoder.decode(part.substring(eq + 1), "UTF-8");
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
     /** every place a key could hide in the traffic */
     private List<byte[]> keyCandidates(Map<String, String> headers, JSONObject doc, String rawText) {
         List<byte[]> out = new ArrayList<byte[]>();
@@ -529,6 +602,10 @@ public final class LocalProxy {
                     && !lk.equals("token") && !lk.equals("x-sign")) {
                 continue;
             }
+            if (lk.equals("authorization")) {
+                // describe the token, never print it
+                record("   token: " + Crypto.describeToken(e.getValue()));
+            }
             byte[] raw = e.getValue().getBytes(StandardCharsets.UTF_8);
             byte[] h = Crypto.sha256(raw);
             if (h != null) {
@@ -549,6 +626,8 @@ public final class LocalProxy {
             if (td != null && (td.length == 16 || td.length == 24 || td.length == 32)) {
                 out.add(td);
             }
+            // the whole family of token derived candidates
+            out.addAll(Crypto.tokenCandidates(e.getValue(), null));
         }
         return out;
     }
