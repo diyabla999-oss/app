@@ -1,0 +1,5 @@
+*.xapk filter=lfs diff=lfs merge=lfs -binary
+*.apk filter=lfs diff=lfs merge=lfs -binary
+*.so filter=lfs diff=lfs merge=lfs -binary
+*.jar filter=lfs diff=lfs merge=lfs -binary
+*.xapk.parts/** filter=lfs diff=lfs merge=lfs -binary

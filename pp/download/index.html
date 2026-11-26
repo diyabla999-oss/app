@@ -1,0 +1,49 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Famspace unlock - downloads</title>
+<style>
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:900px;margin:40px auto;padding:0 18px;color:#1a1a1a}
+  h1{font-size:22px} h2{font-size:17px;margin-top:28px}
+  a{color:#0b57d0} li{margin:5px 0}
+  code{background:#f3f4f6;padding:2px 6px;border-radius:4px;font-size:13px}
+  .note{background:#f6f7f9;border-left:4px solid #0b57d0;padding:10px 14px;margin:18px 0;border-radius:4px}
+</style>
+</head>
+<body>
+<h1>Famspace unlock &mdash; downloads</h1>
+
+<div class="note">
+<b>Install order</b><br>
+1. <code>FamspaceUnlock.apk</code> &mdash; the local rewrite proxy that runs on the phone<br>
+2. <code>FamSpace-unlocked.xapk</code> &mdash; the patched app (install with an XAPK installer, or use the APKs below with <code>adb install-multiple</code>)<br>
+3. open <b>Famspace Unlock</b> once, leave it running, then open <b>Famspace</b>
+</div>
+
+<h2>Main files</h2>
+<ul>
+  <li><a href="FamSpace-unlocked.xapk">FamSpace-unlocked.xapk</a> &mdash; 49.5 MB &mdash; patched app, all 19 splits</li>
+  <li><a href="FamspaceUnlock.apk">FamspaceUnlock.apk</a> &mdash; 17 KB &mdash; helper app (proxy on 127.0.0.1:888)</li>
+  <li><a href="README.md">README.md</a> &mdash; install &amp; usage guide</li>
+  <li><a href="ANALYSIS.md">ANALYSIS.md</a> &mdash; the REA / Blutter analysis of the app</li>
+</ul>
+
+<h2>Individual APKs (for <code>adb install-multiple -r</code>)</h2>
+<ul>
+  <li><a href="com.famspace.app.android.apk">com.famspace.app.android.apk</a> &mdash; base</li>
+  <li><a href="config.arm64_v8a.apk">config.arm64_v8a.apk</a> &mdash; arm64 native split (holds the patched libapp.so)</li>
+  <li><a href="config.xxhdpi.apk">config.xxhdpi.apk</a> &middot; <a href="config.zh.apk">config.zh.apk</a> &middot;
+      <a href="config.en.apk">config.en.apk</a> &middot; <a href="config.ar.apk">config.ar.apk</a> &middot;
+      <a href="config.de.apk">config.de.apk</a> &middot; <a href="config.es.apk">config.es.apk</a> &middot;
+      <a href="config.fr.apk">config.fr.apk</a> &middot; <a href="config.hi.apk">config.hi.apk</a> &middot;
+      <a href="config.in.apk">config.in.apk</a> &middot; <a href="config.it.apk">config.it.apk</a> &middot;
+      <a href="config.ja.apk">config.ja.apk</a> &middot; <a href="config.ko.apk">config.ko.apk</a> &middot;
+      <a href="config.my.apk">config.my.apk</a> &middot; <a href="config.pt.apk">config.pt.apk</a> &middot;
+      <a href="config.ru.apk">config.ru.apk</a> &middot; <a href="config.th.apk">config.th.apk</a> &middot;
+      <a href="config.tr.apk">config.tr.apk</a> &middot; <a href="config.vi.apk">config.vi.apk</a></li>
+</ul>
+
+<p><small>Served from the codespace on port 8080.</small></p>
+</body>
+</html>
