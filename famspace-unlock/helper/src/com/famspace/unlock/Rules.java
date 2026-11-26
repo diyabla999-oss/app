@@ -114,9 +114,9 @@ public final class Rules {
     private Rules() {
     }
 
-    /** Rewrites a decoded JSON tree in place; returns true if anything changed. */
-    public static boolean rewrite(Object node, String publicUrl) {
-        boolean changed = false;
+    /** Rewrites a decoded JSON tree in place; returns the keys that changed. */
+    public static java.util.List<String> rewrite(Object node, String publicUrl) {
+        java.util.List<String> changed = new java.util.ArrayList<String>();
         if (node instanceof JSONObject) {
             JSONObject obj = (JSONObject) node;
             Iterator<String> keys = obj.keys();
@@ -124,14 +124,14 @@ public final class Rules {
                 String key = keys.next();
                 Object value = obj.opt(key);
                 if (value instanceof JSONObject || value instanceof JSONArray) {
-                    changed |= rewrite(value, publicUrl);
+                    changed.addAll(rewrite(value, publicUrl));
                     continue;
                 }
                 Object forced = forcedValue(key, value, publicUrl);
                 if (forced != null && !forced.equals(value)) {
                     try {
                         obj.put(key, forced);
-                        changed = true;
+                        changed.add(key);
                     } catch (Exception ignored) {
                     }
                 }
@@ -141,7 +141,7 @@ public final class Rules {
             for (int i = 0; i < arr.length(); i++) {
                 Object value = arr.opt(i);
                 if (value instanceof JSONObject || value instanceof JSONArray) {
-                    changed |= rewrite(value, publicUrl);
+                    changed.addAll(rewrite(value, publicUrl));
                 }
             }
         }

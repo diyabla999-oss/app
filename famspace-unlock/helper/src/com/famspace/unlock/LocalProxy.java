@@ -227,9 +227,16 @@ public final class LocalProxy {
 
             if (ctype != null && ctype.toLowerCase(Locale.US).contains("json") && payload.length > 0) {
                 try {
-                    Object doc = new JSONObject(new String(payload, StandardCharsets.UTF_8));
-                    if (Rules.rewrite(doc, publicUrl)) {
+                    String text = new String(payload, StandardCharsets.UTF_8);
+                    Object doc = new JSONObject(text);
+                    java.util.List<String> keys = Rules.rewrite(doc, publicUrl);
+                    if (!keys.isEmpty()) {
                         payload = doc.toString().getBytes(StandardCharsets.UTF_8);
+                        record("   rewrote " + path + ": " + keys);
+                    }
+                    if (path.contains("profile") || path.contains("login")
+                            || path.contains("wallet") || path.contains("/me/")) {
+                        record("   body " + path + ": " + text.substring(0, Math.min(400, text.length())));
                     }
                 } catch (Exception ignored) {
                     // keep the original body if it is not plain JSON
