@@ -38,8 +38,11 @@ mkdir -p "$WORK/split"
 cd "$WORK/split"
 unzip -q "$WORK/apks/$SPLIT" "lib/arm64-v8a/libapp.so"
 cp "$LIBAPP" "lib/arm64-v8a/libapp.so"
-zip -q -X "$WORK/apks/$SPLIT" "lib/arm64-v8a/libapp.so"
-echo "   patched $SPLIT"
+# -0 = STORE, no compression.  The app sets android:extractNativeLibs="false",
+# so every native library has to stay uncompressed (and page aligned) or the
+# package installer rejects the APK with INSTALL_FAILED_INVALID.
+zip -q -X -0 "$WORK/apks/$SPLIT" "lib/arm64-v8a/libapp.so"
+echo "   patched $SPLIT (libapp.so stored uncompressed)"
 
 echo "== re-signing all APKs"
 SIGNED="$WORK/signed"

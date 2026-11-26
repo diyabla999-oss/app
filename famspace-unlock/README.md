@@ -199,7 +199,24 @@ Dart's `HttpClient` on Android only trusts `/system/etc/security/cacerts`
 certificates into the system store (Famspace's manifest queries for
 Magisk/SuperSU, so rooted devices are clearly expected).
 
-## 7. Limits of this build
+## 7. Install gotchas found the hard way
+
+Two defects broke the install before this build, both now covered by
+`verify_build.sh`:
+
+1. **Compressed native library.**  The app sets
+   `android:extractNativeLibs="false"`, so every `.so` must be *stored
+   uncompressed* and 4096-byte aligned.  Re-injecting the patched
+   `libapp.so` with a plain `zip` compressed it (11.7 MB -> 4.6 MB) and the
+   installer rejected the whole APK.  The repack now uses `zip -0`.
+2. **dex version.**  Reassembling `classes2.dex` with smali rewrote it and
+   downgraded it from dex 037 to dex 035.  The dex is now patched *in place*
+   (only the first instruction of four methods is overwritten), so it keeps
+   version 037, its size and all offsets.
+
+Run `./verify_build.sh output/FamSpace-unlocked.xapk` after any rebuild.
+
+## 8. Limits of this build
 
 * If the server withholds `playUrl` for an item you have not paid for, no
   client-side change can conjure one.  The helper's rewrite forces the
