@@ -21,6 +21,18 @@ service to keep alive — the rewrite proxy now lives **inside** the app.
 | `output/*.apk` | the same APKs individually, for `adb install-multiple` |
 | `output/FamspaceUnlock.apk` | *optional* standalone helper (same proxy with a status screen); not needed with the build above |
 
+### Why login failed: the certificate fingerprint
+
+`Ll7/a.a(PackageManager)` (in `classes5.dex`) computes `buildSignature` as the
+**uppercase SHA-256 hex of the app's own signing certificate**, and the
+backend validates it - a re-signed build sends a different fingerprint and
+every request comes back `{"error":"Invalid sign"}` (login included).
+
+The original `.xapk` is signed with the **official Google Play certificate**
+(`SHA-256 100ea61d15387f4bfd7a3be741043921c4e19fc88d5d40bb6a3f8bc167dbb12a`),
+so the build reports *that* fingerprint instead of ours - the requests become
+byte-identical to the official build's.
+
 ### The "Get this app from the Play Store" redirect
 
 The app declares **PairIP** as its Application class:

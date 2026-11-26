@@ -157,6 +157,18 @@ EOF2
 )
 if [ "$res" = "MISSING=none" ]; then ok "proxy classes are inside classes2.dex"; else bad "proxy classes missing: $res"; fi
 
+echo "== certificate fingerprint"
+(cd "$WORK" && unzip -q -o com.famspace.app.android.apk classes5.dex)
+if python3 -c "
+import sys
+d = open('$WORK/classes5.dex','rb').read()
+fp = b'100EA61D15387F4BFD7A3BE741043921C4E19FC88D5D40BB6A3F8BC167DBB12A'
+sys.exit(0 if fp in d else 1)"; then
+  ok "app reports the original Play certificate fingerprint"
+else
+  bad "the original certificate fingerprint is not in classes5.dex"
+fi
+
 echo "== patches"
 (cd "$WORK" && unzip -q -o com.famspace.app.android.apk classes2.dex)
 if python3 - "$WORK/classes2.dex" <<'EOF'

@@ -67,7 +67,9 @@ def annotate(data, pp, start, count):
             m = re.match(r"(\w+), \[(\w+)(?:, #0x([0-9a-f]+))?\]", i.op_str)
             if m and m.group(1) in pending and pending[m.group(1)][0] == "pp":
                 hi = pending[m.group(1)][1]
-                lo = (int(m.group(3), 16) if m.group(3) else 0) * 8
+                # capstone prints the already-scaled byte offset, which is
+                # exactly what the pool slot is built from.
+                lo = (int(m.group(3), 16) if m.group(3) else 0)
                 slot = (hi << 12) | lo
                 desc = pp.get(slot)
                 if desc:

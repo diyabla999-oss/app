@@ -41,6 +41,11 @@ public final class LocalProxy {
     private volatile boolean running;
     private volatile String lastError;
 
+    /** recent requests, for the /__famunlock/log endpoint */
+    private final java.util.LinkedList<String> log = new java.util.LinkedList<String>();
+    private volatile String lastPath = "";
+    private volatile String lastMethod = "";
+
     public LocalProxy() {
         this(UPSTREAM, DEFAULT_PORT, "http://127.0.0.1:" + DEFAULT_PORT);
     }
@@ -112,6 +117,7 @@ public final class LocalProxy {
                 return;
             }
             String method = parts[0];
+            lastMethod = method;
             String rawTarget = parts[1];
 
             Map<String, String> headers = new LinkedHashMap<>();
@@ -130,6 +136,24 @@ public final class LocalProxy {
             }
 
             String target = normalise(rawTarget);
+            lastPath = target;
+
+            // request log, readable from the phone browser:
+            // http://127.0.0.1:888/__famunlock/log
+            if (target.startsWith("/__famunlock/log")) {
+                StringBuilder sb = new StringBuilder();
+                synchronized (log) {
+                    for (String entry : log) {
+                        sb.append(entry).append('\n');
+                    }
+                }
+                byte[] ok = sb.toString().getBytes(StandardCharsets.UTF_8);
+                out.write(("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: "
+                        + ok.length + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.ISO_8859_1));
+                out.write(ok);
+                out.flush();
+                return;
+            }
 
             // health check, so the proxy can be verified from the phone's
             // browser: http://127.0.0.1:888/__famunlock/health
@@ -177,6 +201,7 @@ public final class LocalProxy {
             int status = conn.getResponseCode();
             byte[] payload = readAll(status >= 400 ? conn.getErrorStream() : conn.getInputStream());
             String ctype = conn.getContentType();
+            record(method + " " + path + " -> " + status + " (" + payload.length + " bytes)");
 
             if (ctype != null && ctype.toLowerCase(Locale.US).contains("json") && payload.length > 0) {
                 try {
@@ -193,6 +218,16 @@ public final class LocalProxy {
             out.flush();
         } catch (Exception e) {
             lastError = String.valueOf(e);
+            record(lastMethod + " " + lastPath + " -> ERROR " + e);
+        }
+    }
+
+    private void record(String line) {
+        synchronized (log) {
+            log.add(line);
+            while (log.size() > 80) {
+                log.removeFirst();
+            }
         }
     }
 

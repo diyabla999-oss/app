@@ -13,6 +13,12 @@ import java.util.Map;
  * The goal: make the Famspace client behave as if the server had answered
  * "you own everything" - unlimited wallet, active VIP, every item unlocked
  * and viewable.
+ *
+ * Every rewrite is TYPE PRESERVING: a value is only replaced when the
+ * replacement has the same JSON type as the original (number -> number,
+ * boolean -> boolean, string -> string).  Swapping a string for a number (or
+ * an int for a bool) would break the Dart model's parser - which shows up as
+ * "the login does not work" rather than as a crash.
  */
 public final class Rules {
 
@@ -142,19 +148,54 @@ public final class Rules {
         return changed;
     }
 
+    /**
+     * Returns the replacement for a key, or null when the value must stay as
+     * it is.  The replacement always keeps the JSON type of the original.
+     */
     private static Object forcedValue(String key, Object value, String publicUrl) {
-        if ("baseUrl".equals(key)) {
-            // keep the app pointed at this local proxy
+        if ("baseUrl".equals(key) && publicUrl != null && value instanceof String) {
             return publicUrl;
         }
-        if (FORCE.containsKey(key)) {
-            return FORCE.get(key);
+        Object forced = FORCE.get(key);
+        if (forced == null) {
+            forced = ZERO_COST.get(key);
         }
-        if (ZERO_COST.containsKey(key)) {
-            return ZERO_COST.get(key);
+        if (forced == null) {
+            forced = FUTURE.get(key);
         }
-        if (FUTURE.containsKey(key)) {
-            return FUTURE.get(key);
+        if (forced == null) {
+            return null;
+        }
+        return sameType(forced, value);
+    }
+
+    /** Converts the forced value to the JSON type of the original value. */
+    private static Object sameType(Object forced, Object original) {
+        if (original == null) {
+            return null;                       // leave nulls alone
+        }
+        if (original instanceof Boolean) {
+            return forced instanceof Boolean ? forced : null;
+        }
+        if (original instanceof Number) {
+            if (forced instanceof Number) {
+                return forced;
+            }
+            if (forced instanceof Boolean) {
+                return forced.equals(Boolean.TRUE) ? 1 : 0;
+            }
+            return null;
+        }
+        if (original instanceof String) {
+            if (forced instanceof String) {
+                return forced;
+            }
+            if (forced instanceof Boolean) {
+                return String.valueOf(forced);
+            }
+            if (forced instanceof Number) {
+                return String.valueOf(forced);
+            }
         }
         return null;
     }

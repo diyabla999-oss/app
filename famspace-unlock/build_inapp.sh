@@ -62,29 +62,31 @@ mkdir -p "$WORK/dec/smali_classes2/com/famspace/unlock"
 cp "$WORK/proxysmali/com/famspace/unlock/"*.smali "$WORK/dec/smali_classes2/com/famspace/unlock/"
 echo "   $(ls "$WORK/dec/smali_classes2/com/famspace/unlock/" | wc -l) smali files"
 
-echo "== patching the PairIP licence check + starting the proxy"
-python3 "$HERE/tools/smali_patch.py" "$WORK/dec"
+echo "== patching the PairIP licence check + starting the proxy + fingerprint"
+FINGERPRINT="${FINGERPRINT:-100EA61D15387F4BFD7A3BE741043921C4E19FC88D5D40BB6A3F8BC167DBB12A}"
+python3 "$HERE/tools/smali_patch.py" "$WORK/dec" "$FINGERPRINT"
 
 echo "== rebuilding classes2.dex"
 java -jar "$APKTOOL" b -f "$WORK/dec" -o "$WORK/rebuilt.apk" >/dev/null 2>&1
 mkdir -p "$WORK/out"
-(cd "$WORK/out" && unzip -q -o "$WORK/rebuilt.apk" classes2.dex)
-python3 - "$WORK/out/classes2.dex" <<'EOF'
+(cd "$WORK/out" && unzip -q -o "$WORK/rebuilt.apk" classes2.dex classes5.dex)
+python3 - "$WORK/out/classes2.dex" "$WORK/out/classes5.dex" <<'EOF'
 import struct, sys, hashlib, zlib
-p = sys.argv[1]
-d = bytearray(open(p, "rb").read())
-print("   rebuilt classes2.dex: %s, %d bytes" % (bytes(d[:8]).decode("latin1").replace("\n", " ").replace("\x00", "").strip(), len(d)))
-# keep the original dex version (037) - smali emits 035
-d[4:8] = b"037\x00"
-d[12:32] = hashlib.sha1(bytes(d[32:])).digest()
-struct.pack_into("<I", d, 8, zlib.adler32(bytes(d[12:])) & 0xFFFFFFFF)
-open(p, "wb").write(bytes(d))
-print("   version set to dex 037, checksum + signature refreshed")
+for p in sys.argv[1:]:
+    d = bytearray(open(p, "rb").read())
+    name = p.rsplit("/", 1)[-1]
+    print("   rebuilt %s: %s, %d bytes" % (name, bytes(d[:8]).decode("latin1").replace("\n", " ").replace("\x00", "").strip(), len(d)))
+    # keep the original dex version (037) - smali emits 035
+    d[4:8] = b"037\x00"
+    d[12:32] = hashlib.sha1(bytes(d[32:])).digest()
+    struct.pack_into("<I", d, 8, zlib.adler32(bytes(d[12:])) & 0xFFFFFFFF)
+    open(p, "wb").write(bytes(d))
+    print("      version set to dex 037, checksum + signature refreshed")
 EOF
 
-echo "== swapping classes2.dex into the untouched base APK"
+echo "== swapping the rebuilt dex files into the untouched base APK"
 cp "$WORK/apks/com.famspace.app.android.apk" "$WORK/base.apk"
-(cd "$WORK/out" && zip -q -X "$WORK/base.apk" classes2.dex)
+(cd "$WORK/out" && zip -q -X "$WORK/base.apk" classes2.dex classes5.dex)
 cp "$WORK/base.apk" "$WORK/apks/com.famspace.app.android.apk"
 
 echo "== injecting the patched libapp.so (stored, uncompressed)"

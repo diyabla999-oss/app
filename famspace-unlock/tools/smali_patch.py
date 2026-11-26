@@ -70,6 +70,32 @@ def patch_method(path, sig, instr):
     return "patched"
 
 
+def patch_fingerprint(root, fingerprint):
+    """Make the app report the ORIGINAL (Play) signing certificate fingerprint.
+
+    Ll7/a.a(PackageManager) returns the SHA-256 hex of the app's own signing
+    certificate; the backend validates it ("Invalid sign"), so a re-signed
+    build is rejected on every request - including login.  Reporting the
+    original fingerprint makes the request identical to the official build.
+    """
+    path = os.path.join(root, "smali_classes5/l7/a.smali")
+    if not os.path.exists(path):
+        return "missing"
+    s = open(path, encoding="utf-8").read()
+    if "# patched by build_inapp: report the original certificate fingerprint" in s:
+        return "already"
+    m = re.search(r"(\.method public final a\(Landroid/content/pm/PackageManager;\)Ljava/lang/String;\n)(.*?)(\n\s*\.end method)", s, re.S)
+    if not m:
+        return "missing"
+    body = ("    .locals 1\n\n"
+            "    # patched by build_inapp: report the original certificate fingerprint\n"
+            "    const-string v0, \"" + fingerprint + "\"\n\n"
+            "    return-object v0")
+    s = s[:m.start(2)] + body + s[m.end(2):]
+    open(path, "w", encoding="utf-8").write(s)
+    return "patched"
+
+
 def patch_application(root):
     path = os.path.join(root, "smali_classes2/com/pairip/application/Application.smali")
     s = open(path, encoding="utf-8").read()
@@ -87,6 +113,9 @@ def patch_application(root):
 
 def main():
     root = sys.argv[1]
+    fingerprint = sys.argv[2] if len(sys.argv) > 2 else None
+    if fingerprint:
+        print("   certificate fingerprint   -> %s" % patch_fingerprint(root, fingerprint))
     print("   Application.attachBaseContext -> %s" % patch_application(root))
     for rel, methods in RETURN_AFTER.items():
         path = os.path.join(root, rel)
