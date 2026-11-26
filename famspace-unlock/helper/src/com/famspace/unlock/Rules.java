@@ -41,6 +41,36 @@ public final class Rules {
         FORCE.put("rewardCoins", BIG);
         FORCE.put("favoriteCoins", BIG);
         FORCE.put("baseCoins", BIG);
+        // wallet - singular / variant spellings the server may use
+        FORCE.put("coin", BIG);
+        FORCE.put("gem", BIG);
+        FORCE.put("coinAmount", BIG);
+        FORCE.put("gemAmount", BIG);
+        FORCE.put("coinTotal", BIG);
+        FORCE.put("gemTotal", BIG);
+        FORCE.put("coinsTotal", BIG);
+        FORCE.put("gemsTotal", BIG);
+        FORCE.put("coinsBalance", BIG);
+        FORCE.put("gemsBalance", BIG);
+        FORCE.put("availableCoins", BIG);
+        FORCE.put("availableGems", BIG);
+        FORCE.put("usableCoins", BIG);
+        FORCE.put("usableGems", BIG);
+        FORCE.put("totalCoins", BIG);
+        FORCE.put("totalGems", BIG);
+        FORCE.put("myCoins", BIG);
+        FORCE.put("myGems", BIG);
+        FORCE.put("userCoins", BIG);
+        FORCE.put("userGems", BIG);
+        FORCE.put("coinNum", BIG);
+        FORCE.put("gemNum", BIG);
+        FORCE.put("numCoins", BIG);
+        FORCE.put("numGems", BIG);
+        FORCE.put("diamonds", BIG);
+        FORCE.put("credit", BIG);
+        FORCE.put("credits", BIG);
+        FORCE.put("points", BIG);
+        FORCE.put("point", BIG);
         // subscription / premium
         FORCE.put("vipLv", 99);
         FORCE.put("vipLevel", 99);
@@ -102,6 +132,13 @@ public final class Rules {
         ZERO_COST.put("needCoins", 0);
         ZERO_COST.put("coinPrice", 0);
         ZERO_COST.put("gemPrice", 0);
+        ZERO_COST.put("coinsRequired", 0);
+        ZERO_COST.put("gemsRequired", 0);
+        ZERO_COST.put("coinsNeeded", 0);
+        ZERO_COST.put("gemsNeeded", 0);
+        ZERO_COST.put("coinPerAd", 0);
+        ZERO_COST.put("coinsPerAd", 0);
+        ZERO_COST.put("unlockPrice", 0);
 
         FUTURE.put("vipEnd", "2099-12-31T23:59:59Z");
         FUTURE.put("vipExpire", "2099-12-31T23:59:59Z");

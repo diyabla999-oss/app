@@ -29,7 +29,9 @@ public class FakeUpstream {
         HttpServer s = HttpServer.create(new InetSocketAddress("127.0.0.1", 9999), 0);
         s.createContext("/", new HttpHandler() {
             public void handle(HttpExchange e) throws IOException {
-                String body = "{\"code\":0,\"data\":{\"gems\":12,\"coins\":3,\"vipLv\":0,"
+                String body = "{\"code\":0,\"data\":{\"gems\":12,\"coins\":3,\"coin\":7,"
+                        + "\"availableCoins\":5,\"totalGems\":9,\"points\":4,"
+                        + "\"coinsRequired\":30,\"vipLv\":0,"
                         + "\"vipEnd\":\"2026-01-01T00:00:00Z\",\"canView\":false,"
                         + "\"canDownload\":false,\"isLocked\":true,\"unlockType\":\"coins\","
                         + "\"alreadyUnlocked\":false,\"dailyLimit\":3,\"expireDay\":1,"
@@ -80,7 +82,10 @@ python3 - "$BODY" <<'EOF'
 import json, sys
 d = json.loads(sys.argv[1])["data"]
 checks = {
-    "gems": 999999999, "coins": 999999999, "vipLv": 99, "canView": True,
+    "gems": 999999999, "coins": 999999999, "coin": 999999999,
+    "availableCoins": 999999999, "totalGems": 999999999, "points": 999999999,
+    "coinsRequired": 0,
+    "vipLv": 99, "canView": True,
     "canDownload": True, "isLocked": False, "unlockType": "", "alreadyUnlocked": True,
     "dailyLimit": 100000, "expireDay": 36500, "premiumPurchased": True,
     "baseUrl": "http://127.0.0.1:8888", "playUrl": "https://x/y.m3u8", "price": 150,

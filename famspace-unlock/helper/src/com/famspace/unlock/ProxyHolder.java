@@ -21,13 +21,13 @@ public final class ProxyHolder {
 
     public static synchronized void ensureStarted() {
         if (proxy != null && proxy.isRunning()) {
-            status = "running on " + proxy.publicUrl();
+            status = "running on " + proxy.publicUrl() + " (ports " + proxy.ports() + ")";
             return;
         }
         try {
             proxy = new LocalProxy();
             proxy.start();
-            status = "running on " + proxy.publicUrl();
+            status = "running on " + proxy.publicUrl() + " (ports " + proxy.ports() + ")";
             Log.i(TAG, status);
         } catch (Throwable t) {
             status = "failed: " + t;
@@ -37,7 +37,7 @@ public final class ProxyHolder {
             try {
                 proxy = new LocalProxy();
                 proxy.start();
-                status = "running on " + proxy.publicUrl();
+                status = "running on " + proxy.publicUrl() + " (ports " + proxy.ports() + ")";
                 Log.i(TAG, status);
             } catch (Throwable t2) {
                 status = "failed: " + t2;
@@ -48,7 +48,7 @@ public final class ProxyHolder {
 
     public static synchronized String status() {
         if (proxy != null && proxy.isRunning()) {
-            return "running on " + proxy.publicUrl();
+            return "running on " + proxy.publicUrl() + " (ports " + proxy.ports() + ")";
         }
         if (proxy != null && proxy.lastError() != null) {
             return "error: " + proxy.lastError();

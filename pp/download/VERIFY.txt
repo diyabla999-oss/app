@@ -2,11 +2,7 @@ Famspace unlock - install checklist
 ====================================
 
 Published build (verified by famspace-unlock/verify_build.sh + verify_apk.sh):
-b351db6c854c656527bd7ce79696c981  Famspace-universal.apk
-7df2a9929ccd7d5a027cf0dd1a55c23d  FamSpace-unlocked.xapk
-8f45f6c4a59db4bedfa19f10f0599f82  com.famspace.app.android.apk
-4f5a341f3bdaa1fbb6e63f4175ce8d84  config.arm64_v8a.apk
-6af2fccef9636f5b4c48db8f94cab6e8  config.xxhdpi.apk
+  md5 / sha256 of every file are below.
 
 Install (simplest):
   1. uninstall the original Famspace (Play version) - the patched build has a
@@ -24,3 +20,42 @@ If it still fails, adb prints the exact reason, e.g.
   INSTALL_FAILED_INVALID          -> a .so was compressed (wrong file)
   INSTALL_FAILED_UPDATE_INCOMPATIBLE -> the original app is still installed
   INSTALL_FAILED_MISSING_SPLIT    -> the splits were not installed together
+
+
+Wallet check (why the balance may still look wrong)
+---------------------------------------------------
+The proxy rewrites the server's answers.  After logging in, open this in the
+phone's browser:
+
+     http://127.0.0.1:8888/__famunlock/log        (or :8888/__famunlock/log)
+     http://127.0.0.1:8888/__famunlock/health
+
+Both ports are served - 8888 is the one the app talks to, 888 is the legacy
+port (only bindable on rooted devices).
+
+In the log, look at the line for the profile:
+
+  "rewrote /api/v1/me/profile: [gems, coins, ...]"
+      the rewrite DID fire; the next line ("body /api/v1/me/profile: {...}")
+      shows the raw server answer, so the exact field names are visible
+  "no rule matched /api/v1/me/profile"
+      the answer arrived but no known wallet field was in it - the body line
+      shows what the server actually sent
+  "not json ..." / "body is not a JSON object ..."
+      the answer was not plain JSON - the snippet shows what came back
+
+Every answer that mentions coin/gem/vip/premium is logged with its body, so
+the wallet can be traced in any response, not only in the profile.
+
+
+Digests of the published files:
+
+f478019cc1cef9e95ce255d373ab0945  Famspace-universal.apk
+77aafbae52c6edf87bcef623cebe766a  FamSpace-unlocked.xapk
+efc819ea3fd00dee9e4d6a129eeba227  com.famspace.app.android.apk
+dcb1e7c94a43f0148058bb0038eee1f2  config.arm64_v8a.apk
+6af2fccef9636f5b4c48db8f94cab6e8  config.xxhdpi.apk
+cbd0ded3c4c53a1bbc1e60fd58abedd7  FamspaceUnlock.apk
+
+9d24e14fa9d3a732ac00233d8eea90ff53513e57c4f763a05866295bbb897fdd  Famspace-universal.apk
+49c44421b8222094bdad2a436be68a126e6fbfd2e7cc2cd46757de17d25c658f  FamSpace-unlocked.xapk

@@ -30,6 +30,14 @@ public final class LocalProxy {
     // binding 888 fails with BindException: EACCES (permission denied).
     public static final int DEFAULT_PORT = 8888;
 
+    /**
+     * The port of the previous build.  Binding it is best effort - it only
+     * works on devices that allow privileged ports (rooted, custom kernel) -
+     * but when it does, the log and the health check stay reachable at the
+     * old URL as well.
+     */
+    public static final int LEGACY_PORT = 888;
+
     private static final String[] UPSTREAM = {
             "https://famspace.disoms.net",
             "https://www.famspace.us",
@@ -39,7 +47,7 @@ public final class LocalProxy {
     private final int port;
     private final String publicUrl;
 
-    private ServerSocket server;
+    private final List<ServerSocket> servers = new java.util.ArrayList<ServerSocket>();
     private volatile boolean running;
     private volatile String lastError;
 
@@ -77,16 +85,16 @@ public final class LocalProxy {
         Throwable first = null;
         // 1) the exact address the patched app talks to
         try {
-            server = new ServerSocket(port, 16, InetAddress.getByName("127.0.0.1"));
+            servers.add(new ServerSocket(port, 16, InetAddress.getByName("127.0.0.1")));
         } catch (Throwable t) {
             first = t;
             try {
                 // 2) any interface (covers a device where 127.0.0.1 is odd)
-                server = new ServerSocket(port, 16);
+                servers.add(new ServerSocket(port, 16));
             } catch (Throwable t2) {
                 try {
                     // 3) IPv6 loopback
-                    server = new ServerSocket(port, 16, InetAddress.getByName("::1"));
+                    servers.add(new ServerSocket(port, 16, InetAddress.getByName("::1")));
                 } catch (Throwable t3) {
                     if (first instanceof Exception) {
                         throw (Exception) first;
@@ -95,23 +103,46 @@ public final class LocalProxy {
                 }
             }
         }
+        // 4) the legacy port, best effort - keeps /__famunlock/log reachable
+        //    at the old URL on devices that allow privileged ports
+        if (port != LEGACY_PORT) {
+            try {
+                servers.add(new ServerSocket(LEGACY_PORT, 16, InetAddress.getByName("127.0.0.1")));
+            } catch (Throwable ignored) {
+                // privileged port - the app does not use it any more
+            }
+        }
         running = true;
-        Thread t = new Thread(this::serve, "famunlock");
-        t.setDaemon(false);
-        t.start();
+        for (final ServerSocket s : servers) {
+            Thread t = new Thread(() -> serve(s), "famunlock-" + s.getLocalPort());
+            t.setDaemon(false);
+            t.start();
+        }
+    }
+
+    /** The ports the proxy is listening on. */
+    public String ports() {
+        StringBuilder sb = new StringBuilder();
+        for (ServerSocket s : servers) {
+            if (sb.length() > 0) {
+                sb.append(',');
+            }
+            sb.append(s.getLocalPort());
+        }
+        return sb.toString();
     }
 
     public void stop() {
         running = false;
-        try {
-            if (server != null) {
-                server.close();
+        for (ServerSocket s : servers) {
+            try {
+                s.close();
+            } catch (Exception ignored) {
             }
-        } catch (Exception ignored) {
         }
     }
 
-    private void serve() {
+    private void serve(ServerSocket server) {
         while (running) {
             try {
                 final Socket client = server.accept();
@@ -181,6 +212,7 @@ public final class LocalProxy {
             // browser: http://127.0.0.1:888/__famunlock/health
             if (target.startsWith("/__famunlock/health")) {
                 byte[] ok = ("{\"status\":\"ok\",\"url\":\"" + publicUrl
+                        + "\",\"ports\":\"" + ports()
                         + "\",\"upstream\":\"" + upstream[0] + "\"}").getBytes(StandardCharsets.UTF_8);
                 out.write(("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
                         + ok.length + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.ISO_8859_1));
@@ -223,23 +255,39 @@ public final class LocalProxy {
             int status = conn.getResponseCode();
             byte[] payload = readAll(status >= 400 ? conn.getErrorStream() : conn.getInputStream());
             String ctype = conn.getContentType();
-            record(method + " " + path + " -> " + status + " (" + payload.length + " bytes)");
+            record(method + " " + path + " -> " + status + " (" + payload.length + " bytes)"
+                    + (ctype == null ? " [no content-type]" : " [" + ctype + "]"));
 
-            if (ctype != null && ctype.toLowerCase(Locale.US).contains("json") && payload.length > 0) {
-                try {
-                    String text = new String(payload, StandardCharsets.UTF_8);
-                    Object doc = new JSONObject(text);
-                    java.util.List<String> keys = Rules.rewrite(doc, publicUrl);
-                    if (!keys.isEmpty()) {
-                        payload = doc.toString().getBytes(StandardCharsets.UTF_8);
-                        record("   rewrote " + path + ": " + keys);
+            if (payload.length > 0) {
+                String text = new String(payload, StandardCharsets.UTF_8);
+                boolean json = ctype != null && ctype.toLowerCase(Locale.US).contains("json");
+                if (json) {
+                    try {
+                        Object doc = new JSONObject(text);
+                        java.util.List<String> keys = Rules.rewrite(doc, publicUrl);
+                        if (!keys.isEmpty()) {
+                            payload = doc.toString().getBytes(StandardCharsets.UTF_8);
+                            record("   rewrote " + path + ": " + keys);
+                        } else {
+                            record("   no rule matched " + path);
+                        }
+                        // the wallet can live in any answer, so log every body
+                        // that mentions it - that is how we find the field the
+                        // app really reads
+                        String lower = text.toLowerCase(Locale.US);
+                        if (lower.contains("coin") || lower.contains("gem")
+                                || lower.contains("vip") || lower.contains("premium")
+                                || path.contains("profile") || path.contains("login")
+                                || path.contains("wallet") || path.contains("/me/")) {
+                            record("   body " + path + ": " + text.substring(0, Math.min(600, text.length())));
+                        }
+                    } catch (Exception e) {
+                        record("   body is not a JSON object " + path + ": "
+                                + text.substring(0, Math.min(200, text.length())));
                     }
-                    if (path.contains("profile") || path.contains("login")
-                            || path.contains("wallet") || path.contains("/me/")) {
-                        record("   body " + path + ": " + text.substring(0, Math.min(400, text.length())));
-                    }
-                } catch (Exception ignored) {
-                    // keep the original body if it is not plain JSON
+                } else if (text.length() > 0) {
+                    record("   not json " + path + ": "
+                            + text.substring(0, Math.min(200, text.length())));
                 }
             }
 

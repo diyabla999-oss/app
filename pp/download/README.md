@@ -328,6 +328,33 @@ The exact reason is visible with:
 adb install-multiple output/com.famspace.app.android.apk output/config.arm64_v8a.apk output/config.xxhdpi.apk
 ```
 
+### If the wallet still shows the real balance
+
+The proxy rewrites the server's answers, so the balance the app shows is the
+rewritten one.  The log says exactly what happened:
+
+```bash
+# on the phone's browser
+http://127.0.0.1:8888/__famunlock/log        # or :8888
+http://127.0.0.1:8888/__famunlock/health      # which ports are up
+```
+
+| log line | meaning |
+|---|---|
+| `rewrote /api/v1/me/profile: [gems, coins, …]` | the rewrite fired; the following `body …` line shows the raw server answer, so the field names are visible |
+| `no rule matched /api/v1/me/profile` | the answer arrived but carried no known wallet field — the `body …` line shows what the server actually sent |
+| `not json …` / `body is not a JSON object …` | the answer was not plain JSON — the snippet shows what came back |
+
+Every answer that mentions `coin`/`gem`/`vip`/`premium` is logged with its
+body, so the wallet can be traced in any response, not only in the profile.
+
+The rules cover `coins`, `gems`, `balance` and the usual variants
+(`coin`, `availableCoins`, `totalGems`, `points`, …); costs (`coinsRequired`,
+`coinCost`, …) become 0 while IAP prices are left alone.  If the log shows
+`no rule matched` with a body that *does* contain the wallet under a name
+that is not in the rules, that name goes into `Rules.FORCE` and the build is
+one `./build_inapp.sh` away.
+
 
 ## 8. Limits of this build
 

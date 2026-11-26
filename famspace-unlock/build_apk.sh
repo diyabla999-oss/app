@@ -75,6 +75,21 @@ done
 cp manifest.json "$XPACK"/ 2>/dev/null || true
 cp icon.png "$XPACK"/ 2>/dev/null || true
 
+# total_size has to describe THIS archive, not the one the xapk came from
+python3 - "$XPACK" <<'EOF'
+import json, os, sys
+root = sys.argv[1]
+mp = os.path.join(root, "manifest.json")
+if os.path.exists(mp):
+    m = json.load(open(mp))
+    total = sum(os.path.getsize(os.path.join(root, f))
+                for f in os.listdir(root) if f.endswith(".apk"))
+    if m.get("total_size") != total:
+        print("   manifest total_size %s -> %d" % (m.get("total_size"), total))
+        m["total_size"] = total
+        json.dump(m, open(mp, "w"), separators=(",", ":"))
+EOF
+
 XAPK_OUT="$OUTDIR/$(basename "${XAPK%.xapk}")-unlocked.xapk"
 rm -f "$XAPK_OUT"
 cd "$XPACK"
