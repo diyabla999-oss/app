@@ -18,7 +18,7 @@ public final class ProxyProvider extends ContentProvider {
 
     @Override
     public boolean onCreate() {
-        ProxyHolder.ensureStarted();
+        ProxyHolder.ensureStarted(getContext());
         return true;
     }
 

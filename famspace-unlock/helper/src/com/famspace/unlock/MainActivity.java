@@ -32,7 +32,7 @@ public class MainActivity extends Activity {
             Log.e("FamUnlock", "ui failed", t);
         }
         try {
-            ProxyHolder.ensureStarted();
+            ProxyHolder.ensureStarted(this);
         } catch (Throwable t) {
             Log.e("FamUnlock", "proxy failed", t);
         }
@@ -88,7 +88,7 @@ public class MainActivity extends Activity {
         retry.setText("Restart proxy");
         retry.setOnClickListener(v -> {
             try {
-                ProxyHolder.ensureStarted();
+                ProxyHolder.ensureStarted(this);
             } catch (Throwable t) {
                 Log.e("FamUnlock", "retry failed", t);
             }

@@ -33,7 +33,7 @@ public class ProxyService extends Service {
             Log.e(TAG, "startForeground failed (continuing without notification)", t);
         }
         try {
-            ProxyHolder.ensureStarted();
+            ProxyHolder.ensureStarted(this);
         } catch (Throwable t) {
             Log.e(TAG, "proxy start failed", t);
         }

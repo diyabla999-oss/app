@@ -60,6 +60,12 @@ In the log:
       what the proxy changed inside it
   "re-encrypted responseData"
       the answer was encrypted again and sent to the app
+  "scanning the app's memory for the key ..."
+      the proxy reads /proc/self/mem (it runs inside the app process) and
+      looks for the key in the Dart heap - this takes a couple of minutes
+  "FOUND the key in <region> @<address> (<layout>)"
+      the key was found; from the next answer on the wallet is rewritten -
+      pull to refresh the screen (or reopen the app) to get the new answer
   "payload is encrypted (...) and the key is still unknown"
       the key could not be derived from the traffic - the log shows every
       request and answer, so it can be worked out from that

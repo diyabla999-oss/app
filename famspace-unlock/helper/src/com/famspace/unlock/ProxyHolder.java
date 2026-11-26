@@ -1,6 +1,11 @@
 package com.famspace.unlock;
 
+import android.content.Context;
+import android.content.res.AssetManager;
 import android.util.Log;
+
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 
 /**
  * Holds the one proxy instance for the whole app process.
@@ -13,13 +18,40 @@ import android.util.Log;
 public final class ProxyHolder {
 
     private static final String TAG = "FamUnlock";
+
+    /** the app's own strings - used to crack the JWT secret of the session */
+    private static final String DICT_ASSET = "famunlock/dict.txt";
+
     private static LocalProxy proxy;
     private static String status = "not started";
 
     private ProxyHolder() {
     }
 
-    public static synchronized void ensureStarted() {
+    /** loads the string dictionary from the assets (once) */
+    private static void loadDictionary(Context context) {
+        if (LocalProxy.dictionary != null || context == null) {
+            return;
+        }
+        try {
+            AssetManager assets = context.getAssets();
+            InputStream in = assets.open(DICT_ASSET);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                out.write(buf, 0, n);
+            }
+            in.close();
+            LocalProxy.dictionary = new String(out.toByteArray(), "UTF-8");
+            Log.i(TAG, "dictionary loaded: " + LocalProxy.dictionary.length() + " chars");
+        } catch (Throwable t) {
+            Log.w(TAG, "no dictionary: " + t);
+        }
+    }
+
+    public static synchronized void ensureStarted(Context context) {
+        loadDictionary(context);
         if (proxy != null && proxy.isRunning()) {
             status = "running on " + proxy.publicUrl() + " (ports " + proxy.ports() + ")";
             return;

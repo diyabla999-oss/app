@@ -362,6 +362,20 @@ derivations) were tried against the captured payload and none decrypted it.
 It is assembled at runtime or handed out by the server — which is why the
 proxy learns it from the traffic instead of from the binary.
 
+### The memory scan
+
+The proxy runs **inside the app process**, so it can read `/proc/self/maps`
+and `/proc/self/mem`.  The Dart heap (the read-only heap of `libapp.so`) and
+the app's own heap are mapped there — and so is the key, whether it is a
+constant in the snapshot or something the app assembled at runtime.  When a
+payload cannot be decrypted, the proxy starts a background scan that tries
+every 16/24/32-byte window of the process memory as a key, the snapshot's
+data segment first.  The one that really decrypts the payload is the key.
+
+`TestScan` proves the mechanism: a random key encrypts a JSON payload, and
+the scan finds it in the process' own memory (34 s for 336 MB of regions on a
+server CPU; a couple of minutes on the phone).
+
 ### If the wallet still shows the real balance
 
 The proxy rewrites the server's answers, so the balance the app shows is the

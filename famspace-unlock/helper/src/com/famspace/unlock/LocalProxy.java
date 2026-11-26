@@ -71,6 +71,13 @@ public final class LocalProxy {
     // key material seen in earlier answers (the server may hand it out in
     // the config, while the encrypted payload comes later)
     private final List<byte[]> knownKeys = new ArrayList<byte[]>();
+    // the app's own strings, used to crack the JWT secret (set by the
+    // Android side from the assets)
+    public static volatile String dictionary;
+    // the secret of the bearer token, once it is cracked
+    private volatile byte[] jwtSecret;
+    // the one shot memory scan
+    private volatile boolean scanStarted;
 
     public LocalProxy() {
         this(UPSTREAM, DEFAULT_PORT, "http://127.0.0.1:" + DEFAULT_PORT);
@@ -356,6 +363,106 @@ public final class LocalProxy {
      * When one really decrypts them, the proxy keeps it and from then on
      * decrypts, rewrites and re-encrypts every answer.
      */
+    /**
+     * Cracks the HS256 secret of the bearer token with the app's own strings.
+     * The token never leaves the phone - only the result is used.
+     */
+
+    /**
+     * Scans the app's own memory for the key.  The proxy lives inside the app
+     * process, so the Dart heap - and the key in it - is readable at
+     * /proc/self/mem.  Runs once, in the background.
+     */
+    private void startMemoryScan(final byte[] blob, final List<Crypto.Combo> combos) {
+        if (scanStarted) {
+            return;
+        }
+        scanStarted = true;
+        Thread t = new Thread(new ScanTask(this, blob, combos), "famunlock-scan");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** the background scan (a named class: d8 trips over nested anonymous ones) */
+    private static final class ScanTask implements Runnable {
+        private final LocalProxy proxy;
+        private final byte[] blob;
+        private final List<Crypto.Combo> combos;
+
+        ScanTask(LocalProxy proxy, byte[] blob, List<Crypto.Combo> combos) {
+            this.proxy = proxy;
+            this.blob = blob;
+            this.combos = combos;
+        }
+
+        public void run() {
+            proxy.record("   scanning the app's memory for the key ...");
+            byte[] key = MemoryScan.scan(blob, combos, new ScanProgress(proxy));
+            if (key != null) {
+                proxy.record("   the key is known now - the next answer will be rewritten");
+            } else {
+                proxy.record("   memory scan: no key found");
+            }
+        }
+    }
+
+    /** progress of the background scan */
+    private static final class ScanProgress implements MemoryScan.Progress {
+        private final LocalProxy proxy;
+
+        ScanProgress(LocalProxy proxy) {
+            this.proxy = proxy;
+        }
+
+        public void start(long bytes) {
+            proxy.record("   memory scan: " + (bytes / 1024) + " KB");
+        }
+
+        public void found(String region, long offset, Crypto.Combo combo, byte[] key) {
+            proxy.record("   FOUND the key in " + region + " @" + Long.toHexString(offset)
+                    + " (" + combo + ")");
+            proxy.cryptoKey = key;
+            proxy.cryptoCombo = combo;
+        }
+
+        public void failed(Exception e) {
+            proxy.record("   memory scan failed: " + e);
+        }
+    }
+
+    /**
+     * Cracks the HS256 secret of the bearer token with the app's own strings.
+     * The token never leaves the phone - only the result is used.
+     */
+    private byte[] crackJwt(Map<String, String> headers) {
+        String dict = dictionary;
+        if (dict == null || dict.isEmpty()) {
+            return null;
+        }
+        String auth = headers.get("authorization");
+        if (auth == null) {
+            return null;
+        }
+        int sp = auth.indexOf(' ');
+        String token = sp >= 0 ? auth.substring(sp + 1).trim() : auth.trim();
+        try {
+            byte[] secret = Crypto.crackJwtSecret(token, dict, 0);
+            if (secret == null) {
+                // the heap packs strings back to back, so the secret can be a
+                // slice of a longer run - try the common lengths
+                for (int len : new int[]{16, 24, 32}) {
+                    secret = Crypto.crackJwtSecret(token, dict, len);
+                    if (secret != null) {
+                        break;
+                    }
+                }
+            }
+            return secret;
+        } catch (Throwable e) {
+            return null;
+        }
+    }
+
     private JSONObject handleEncrypted(JSONObject doc, Map<String, String> headers, String rawText,
                                        String reqBody) {
         try {
@@ -432,7 +539,31 @@ public final class LocalProxy {
                     return rewriteEncrypted(doc, field, plain, blob);
                 }
             }
+
+            // 5) the JWT secret: the app verifies the token, so it knows the
+            //    secret - and a JWT is a known-plaintext oracle for it
+            if (jwtSecret == null) {
+                jwtSecret = crackJwt(headers);
+                if (jwtSecret != null) {
+                    record("   cracked the JWT secret from the app's own strings");
+                    List<byte[]> derived = Crypto.secretCandidates(jwtSecret);
+                    synchronized (knownKeys) {
+                        knownKeys.addAll(derived);
+                    }
+                    for (byte[] cand : derived) {
+                        Crypto.Combo combo = Crypto.findCombo(cand, blob, combos);
+                        if (combo != null) {
+                            cryptoKey = cand;
+                            cryptoCombo = combo;
+                            record("   learned the API key (" + combo + ")");
+                            byte[] plain = Crypto.decrypt(cand, blob, combo);
+                            return rewriteEncrypted(doc, field, plain, blob);
+                        }
+                    }
+                }
+            }
             record("   payload is encrypted (" + blob.length + " bytes) and the key is still unknown");
+            startMemoryScan(blob, combos);
         } catch (Exception ignored) {
         }
         return doc;

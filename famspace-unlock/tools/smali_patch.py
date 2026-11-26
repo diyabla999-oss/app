@@ -101,7 +101,7 @@ def patch_application(root):
     s = open(path, encoding="utf-8").read()
     old = "    invoke-static {p1}, Lcom/pairip/licensecheck/LicenseClient;->checkLicense(Landroid/content/Context;)V"
     new = ("    # patched by build_inapp: licence check disabled, local rewrite proxy started here\n"
-           "    invoke-static {}, Lcom/famspace/unlock/ProxyHolder;->ensureStarted()V")
+           "    invoke-static {p1}, Lcom/famspace/unlock/ProxyHolder;->ensureStarted(Landroid/content/Context;)V")
     if new.strip() in s:
         return "already"
     if old not in s:
