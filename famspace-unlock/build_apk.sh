@@ -90,7 +90,8 @@ if os.path.exists(mp):
         json.dump(m, open(mp, "w"), separators=(",", ":"))
 EOF
 
-XAPK_OUT="$OUTDIR/$(basename "${XAPK%.xapk}")-unlocked.xapk"
+# the published name is fixed, so publish.sh always finds it
+XAPK_OUT="$OUTDIR/FamSpace-unlocked.xapk"
 rm -f "$XAPK_OUT"
 cd "$XPACK"
 # The Play XAPK stores every entry UNCOMPRESSED and puts manifest.json last.

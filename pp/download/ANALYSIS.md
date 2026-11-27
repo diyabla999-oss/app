@@ -138,6 +138,52 @@ Dart stores these as plain ASCII in the read-only heap of `libapp.so`; the
 string data area is packed back-to-back (string lengths live in a separate
 table), so an **equal-length in-place replacement needs no header fix**.
 
+## E2. The API crypto (solved)
+
+Every payload is encrypted into `responseData`:
+
+```
+responseData = base64( ciphertext || index byte )
+```
+
+| part | how it was found |
+|---|---|
+| the **key table** | the Dart object pool of `libapp.so`, `pp+0x9230`: `Map<String, String>(16)` with the keys `a`…`f` and `0`…`9` and sixteen 16-character values.  It sits next to `pp+0x9258` (`"AES/"`) and `pp+0x9260` (`Map<jQ, String>` mapping the cipher-mode enum to `CBC`, `CTR`, `ECB`, `OFB-64`, `CFB-64`, `GCM`, `OFB-64/GCTR`, `SIC`) |
+| the **framing** | every captured answer is `N × 16 + 1` bytes long; the trailing byte is the index into the table, the rest is the ciphertext |
+| the **mode** | AES-128-**CBC**, and the **IV is the key itself** |
+| the **padding** | the plaintext is the JSON followed by zero bytes up to the block boundary |
+
+How the framing was pinned down, in order:
+
+1. the key table gave sixteen candidate keys;
+2. CBC makes the *second* block independent of the IV
+   (`P2 = D(C2) XOR C1`), so the key could be confirmed from the second
+   block alone — for `ai/task/list` the tail `l":0}` came out of the key
+   `cZ1xV3bN5mK7lJ9h` (index `e`);
+3. with the key known, the IV fell out of the algebra
+   (`IV = D(C1) XOR P1`): the profile starts with `{"appAccountToken":"76`,
+   and the recovered IV was the key;
+4. two captured answers still did not decrypt — the reason was a **single
+   mistyped character** in the base64 that had been copied out of the log by
+   hand.  Both decrypt once the typo is corrected.
+
+The numeric fields of the profile are read by the Dart model with
+
+```
+ldur  w4, [x3, #off]      ; the raw 32 bit value
+sbfiz x0, w4, #1, #0x1f
+cmp   w4, x0, asr #1
+```
+
+which is the Smi/Mint check — values below 2^29 stay small integers, larger
+ones become 64 bit integers.  The server already sends `uid: 5342202629` and
+`sizeCap: 2147483648` through the same path, so the rewritten
+`coins: 999999999` is in the same class of value.
+
+`vipEnd` is read as an **integer** (the model formats it as a date), so it is
+rewritten to `2147483647` (2038-01-19) and not to a date string — a string
+there would break the model's type cast.
+
 ## F. Where the analysis stands
 
 * The wallet, the VIP level and the per-item `playUrl` are all produced by the
@@ -149,6 +195,9 @@ table), so an **equal-length in-place replacement needs no header fix**.
 * Consequently the only lever that produces a *working* unlock is to change
   what the client receives: the patched APK redirects the service hosts to a
   local proxy that rewrites the answers (see README).
+* With the crypto solved the proxy decrypts every answer, rewrites the
+  wallet inside it and encrypts it again — the client believes it is a
+  member.  The server still decides whether a paid space really opens.
 
 ### Tooling used
 

@@ -33,7 +33,7 @@ public final class LocalProxy {
      * serving a request - an old build without this marker cannot be told
      * apart from a new one that simply has nothing to log.
      */
-    public static final String BUILD_ID = "2026-11-26-wallet6";
+    public static final String BUILD_ID = "2026-11-27-wallet7";
 
     // Android refuses privileged ports (<1024) for unprivileged apps:
     // binding 888 fails with BindException: EACCES (permission denied).
@@ -65,22 +65,8 @@ public final class LocalProxy {
     private volatile String lastPath = "";
     private volatile String lastMethod = "";
 
-    // the learned AES key of the encrypted API payloads (null until found)
-    private volatile byte[] cryptoKey;
-    private volatile Crypto.Combo cryptoCombo;
-    // key material seen in earlier answers (the server may hand it out in
-    // the config, while the encrypted payload comes later)
-    private final List<byte[]> knownKeys = new ArrayList<byte[]>();
-    // the app's own strings, used to crack the JWT secret (set by the
-    // Android side from the assets)
-    public static volatile String dictionary;
-    // the secret of the bearer token, once it is cracked
-    private volatile byte[] jwtSecret;
-    // the one shot memory scan
-    private volatile boolean scanStarted;
-    // what the scan and the JWT crack are doing (shown in the log banner)
-    private volatile String scanState = "idle";
-    private volatile String jwtState = "idle";
+    // how many encrypted answers have been decrypted and rewritten
+    private volatile int rewrittenCount;
     // the state of the cache patch
     private volatile String cacheState = "idle";
     private volatile boolean cachePatched;
@@ -244,8 +230,7 @@ public final class LocalProxy {
                 // says which build is serving it
                 sb.append("FamUnlock proxy build ").append(BUILD_ID)
                         .append("  listening on ports ").append(ports())
-                        .append("  [scan: ").append(scanState)
-                        .append(", jwt: ").append(jwtState)
+                        .append("  [rewritten: ").append(rewrittenCount)
                         .append(", cache: ").append(cacheState).append(']').append('\n');
                 synchronized (log) {
                     for (String entry : log) {
@@ -318,10 +303,14 @@ public final class LocalProxy {
                         + text.substring(0, Math.min(700, text.length())));
                 if (json) {
                     try {
-                        JSONObject doc = new JSONObject(text);
+                        // The tree keeps the order of the keys and the text of
+                        // the values that are not changed, so the app sees the
+                        // same answer it would have seen - only the values we
+                        // rewrite differ.
+                        Json doc = Json.parse(text);
                         // the API ships its payload encrypted -> decrypt it,
                         // rewrite the wallet and encrypt it again
-                        doc = handleEncrypted(doc, headers, text,
+                        handleEncrypted(doc, headers, text,
                                 body == null ? null : new String(body, StandardCharsets.UTF_8));
                         java.util.List<String> keys = Rules.rewrite(doc, publicUrl);
                         if (!keys.isEmpty()) {
@@ -330,7 +319,7 @@ public final class LocalProxy {
                         // the answer has to be written back whenever it
                         // changed - the rewrite can be inside the encrypted
                         // payload, where the outer object looks untouched
-                        String rewritten = doc.toString();
+                        String rewritten = doc.write();
                         if (!rewritten.equals(text)) {
                             payload = rewritten.getBytes(StandardCharsets.UTF_8);
                             record("    app sees: "
@@ -363,21 +352,121 @@ public final class LocalProxy {
 
     /**
      * The API answers with an encrypted payload: the real answer sits in the
-     * "responseData" field, encrypted.  Without the key the wallet cannot be
-     * touched - so the proxy learns the key from the traffic:
+     * "responseData" field, encrypted.
      *
-     *  * a key that the server hands out in the clear (config, device/install)
-     *  * a key derived from the bearer token (SHA-256/MD5 of it)
+     * The encryption was reverse engineered out of the Dart code of the app
+     * (see ApiCrypto):
      *
-     * and checks every candidate against the encrypted payloads it has seen.
-     * When one really decrypts them, the proxy keeps it and from then on
-     * decrypts, rewrites and re-encrypts every answer.
+     *   responseData = base64( ciphertext || index byte )
+     *
+     * The index byte selects one of the sixteen keys that the app keeps in
+     * a map, the IV of the cipher is that key and the plaintext is the JSON
+     * padded with zero bytes.
+     *
+     * So the proxy can decrypt every answer, rewrite the wallet inside it
+     * and encrypt it again - the app sees a normal answer and never notices
+     * anything.
      */
-    /**
-     * Cracks the HS256 secret of the bearer token with the app's own strings.
-     * The token never leaves the phone - only the result is used.
-     */
+    private void handleEncrypted(Json doc, Map<String, String> headers, String rawText,
+                                 String reqBody) {
+        try {
+            // 1) is there an encrypted payload in this answer?
+            String b64 = null;
+            String field = null;
+            Json fieldNode = null;
+            Map<String, Json> members = doc.members();
+            if (members == null) {
+                return;
+            }
+            for (String key : new String[]{"responseData", "response_data", "data",
+                    "payload", "encryptedData", "result", "content"}) {
+                Json node = members.get(key);
+                if (node == null) {
+                    continue;
+                }
+                String s = node.asString();
+                if (s != null && s.length() > 16) {
+                    b64 = s;
+                    field = key;
+                    fieldNode = node;
+                    break;
+                }
+            }
+            if (b64 == null) {
+                return;
+            }
+            byte[] blob = Crypto.decodeBase64(b64);
+            if (blob == null || blob.length < 17) {
+                return;
+            }
+            // the field holds plain JSON -> nothing to do
+            String probe = new String(blob, StandardCharsets.UTF_8);
+            if (probe.trim().startsWith("{")) {
+                return;
+            }
 
+            // 2) decrypt it with the key the index byte points at
+            byte[] plain = ApiCrypto.decrypt(blob);
+            if (plain == null) {
+                record("   " + field + " is encrypted with an unknown key"
+                        + " (index '" + ApiCrypto.indexOf(blob) + "')");
+                return;
+            }
+            String text = new String(plain, StandardCharsets.UTF_8).trim();
+            record("   decrypted " + field + ": " + text.substring(0, Math.min(700, text.length())));
+
+            // 3) rewrite the wallet inside it.  The tree keeps the order of
+            //    the keys and the text of the values that are not touched, so
+            //    the app sees exactly the answer it would have seen.
+            Json inner;
+            try {
+                inner = Json.parse(text);
+            } catch (Exception e) {
+                record("   decrypted payload is not JSON: " + e);
+                return;
+            }
+            java.util.List<String> keys = Rules.rewrite(inner, publicUrl);
+            if (!keys.isEmpty()) {
+                record("   decrypted rewrite: " + keys);
+            }
+            record("   wallet: " + describe(inner));
+
+            // 4) encrypt it again - the index byte stays the same, so the
+            //    app picks the same key
+            byte[] newPlain = inner.write().getBytes(StandardCharsets.UTF_8);
+            byte[] enc = ApiCrypto.encrypt(blob, newPlain);
+            if (enc != null) {
+                fieldNode.set(Json.quote(Crypto.encodeBase64(enc)), Crypto.encodeBase64(enc));
+                rewrittenCount++;
+                record("   re-encrypted " + field + " (" + enc.length + " bytes)");
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    /**
+     * A short description of the wallet inside a decrypted answer, so the log
+     * shows what the app is going to see.
+     */
+    private static String describe(Json node) {
+        Map<String, Json> m = node.members();
+        if (m == null) {
+            return "(not an object)";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String key : new String[]{"coins", "gems", "vipLv", "vipEnd", "balance",
+                "coin", "gem", "points"}) {
+            Json v = m.get(key);
+            if (v == null) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append(", ");
+            }
+            sb.append(key).append("=").append(v.value());
+        }
+        return sb.length() == 0 ? "(no wallet fields)" : sb.toString();
+    }
 
     /**
      * Patches the app's own cache.  What the app caches is the DECRYPTED
@@ -429,243 +518,6 @@ public final class LocalProxy {
                 }
             }
         }
-    }
-
-    /**
-     * Scans the app's own memory for the key.  The proxy lives inside the app
-     * process, so the Dart heap - and the key in it - is readable at
-     * /proc/self/mem.  Runs once, in the background.
-     */
-    private void startMemoryScan(final byte[] blob, final List<Crypto.Combo> combos) {
-        if (scanStarted) {
-            return;
-        }
-        scanStarted = true;
-        Thread t = new Thread(new ScanTask(this, blob, combos), "famunlock-scan");
-        t.setDaemon(true);
-        t.start();
-    }
-
-    /** the background scan (a named class: d8 trips over nested anonymous ones) */
-    private static final class ScanTask implements Runnable {
-        private final LocalProxy proxy;
-        private final byte[] blob;
-        private final List<Crypto.Combo> combos;
-
-        ScanTask(LocalProxy proxy, byte[] blob, List<Crypto.Combo> combos) {
-            this.proxy = proxy;
-            this.blob = blob;
-            this.combos = combos;
-        }
-
-        public void run() {
-            proxy.scanState = "running";
-            proxy.record("   scanning the app's memory for the key ...");
-            byte[] key = MemoryScan.scan(blob, combos, new ScanProgress(proxy));
-            if (key != null) {
-                proxy.scanState = "KEY FOUND";
-                proxy.record("   the key is known now - the next answer will be rewritten");
-            } else {
-                proxy.scanState = "no key";
-                proxy.record("   memory scan: no key found");
-            }
-        }
-    }
-
-    /** progress of the background scan */
-    private static final class ScanProgress implements MemoryScan.Progress {
-        private final LocalProxy proxy;
-
-        ScanProgress(LocalProxy proxy) {
-            this.proxy = proxy;
-        }
-
-        public void start(long bytes) {
-            proxy.record("   memory scan: " + (bytes / 1024) + " KB");
-        }
-
-        public void found(String region, long offset, Crypto.Combo combo, byte[] key) {
-            proxy.record("   FOUND the key in " + region + " @" + Long.toHexString(offset)
-                    + " (" + combo + ")");
-            proxy.cryptoKey = key;
-            proxy.cryptoCombo = combo;
-        }
-
-        public void failed(Exception e) {
-            proxy.scanState = "failed: " + e;
-            proxy.record("   memory scan failed: " + e);
-        }
-    }
-
-    /**
-     * Cracks the HS256 secret of the bearer token with the app's own strings.
-     * The token never leaves the phone - only the result is used.
-     */
-    private byte[] crackJwt(Map<String, String> headers) {
-        String dict = dictionary;
-        if (dict == null || dict.isEmpty()) {
-            return null;
-        }
-        String auth = headers.get("authorization");
-        if (auth == null) {
-            return null;
-        }
-        int sp = auth.indexOf(' ');
-        String token = sp >= 0 ? auth.substring(sp + 1).trim() : auth.trim();
-        try {
-            jwtState = "cracking";
-            byte[] secret = Crypto.crackJwtSecret(token, dict, 0);
-            if (secret == null) {
-                // the heap packs strings back to back, so the secret can be a
-                // slice of a longer run - try the common lengths
-                for (int len : new int[]{16, 24, 32}) {
-                    secret = Crypto.crackJwtSecret(token, dict, len);
-                    if (secret != null) {
-                        break;
-                    }
-                }
-            }
-            jwtState = (secret == null) ? "not found" : "SECRET FOUND";
-            return secret;
-        } catch (Throwable e) {
-            jwtState = "failed: " + e;
-            return null;
-        }
-    }
-
-    private JSONObject handleEncrypted(JSONObject doc, Map<String, String> headers, String rawText,
-                                       String reqBody) {
-        try {
-            // 1) ALWAYS harvest key material - the server may hand out the key
-            //    in one answer (config, device/install) while the encrypted
-            //    payload comes in another one
-            List<byte[]> cands = keyCandidates(headers, doc, rawText);
-            cands.addAll(bodyCandidates(reqBody));
-            synchronized (knownKeys) {
-                for (byte[] c : cands) {
-                    boolean seen = false;
-                    for (byte[] k : knownKeys) {
-                        if (java.util.Arrays.equals(k, c)) {
-                            seen = true;
-                            break;
-                        }
-                    }
-                    if (!seen) {
-                        knownKeys.add(c);
-                    }
-                }
-                while (knownKeys.size() > 64) {
-                    knownKeys.remove(0);
-                }
-            }
-
-            // 2) is there an encrypted payload in this answer?
-            String b64 = null;
-            String field = null;
-            for (String key : new String[]{"responseData", "response_data", "data",
-                    "payload", "encryptedData", "result", "content"}) {
-                Object v = doc.opt(key);
-                if (v instanceof String && ((String) v).length() > 16) {
-                    b64 = (String) v;
-                    field = key;
-                    break;
-                }
-            }
-            if (b64 == null) {
-                return doc;
-            }
-            byte[] blob = Crypto.decodeBase64(b64);
-            if (blob == null || blob.length < 24) {
-                return doc;
-            }
-            // the field holds plain JSON -> nothing to do
-            String probe = new String(blob, StandardCharsets.UTF_8);
-            if (probe.trim().startsWith("{")) {
-                return doc;
-            }
-
-            List<Crypto.Combo> combos = Crypto.combos(blob.length);
-
-            // 3) the key we already know
-            if (cryptoKey != null && cryptoCombo != null) {
-                byte[] plain = Crypto.decrypt(cryptoKey, blob, cryptoCombo);
-                if (Crypto.looksLikeJson(plain)) {
-                    return rewriteEncrypted(doc, field, plain, blob);
-                }
-            }
-
-            // 4) try everything we have seen so far
-            List<byte[]> pool;
-            synchronized (knownKeys) {
-                pool = new ArrayList<byte[]>(knownKeys);
-            }
-            for (byte[] cand : pool) {
-                Crypto.Combo combo = Crypto.findCombo(cand, blob, combos);
-                if (combo != null) {
-                    cryptoKey = cand;
-                    cryptoCombo = combo;
-                    record("   learned the API key (" + combo + ")");
-                    byte[] plain = Crypto.decrypt(cand, blob, combo);
-                    return rewriteEncrypted(doc, field, plain, blob);
-                }
-            }
-
-            // 5) the JWT secret: the app verifies the token, so it knows the
-            //    secret - and a JWT is a known-plaintext oracle for it
-            if (jwtSecret == null) {
-                jwtSecret = crackJwt(headers);
-                if (jwtSecret == null && reqBody != null) {
-                    jwtSecret = Crypto.crackSignSecret(reqBody, dictionary);
-                    if (jwtSecret != null) {
-                        record("   cracked the request signing secret");
-                    }
-                }
-                if (jwtSecret != null) {
-                    record("   cracked the JWT secret from the app's own strings");
-                    List<byte[]> derived = Crypto.secretCandidates(jwtSecret);
-                    synchronized (knownKeys) {
-                        knownKeys.addAll(derived);
-                    }
-                    for (byte[] cand : derived) {
-                        Crypto.Combo combo = Crypto.findCombo(cand, blob, combos);
-                        if (combo != null) {
-                            cryptoKey = cand;
-                            cryptoCombo = combo;
-                            record("   learned the API key (" + combo + ")");
-                            byte[] plain = Crypto.decrypt(cand, blob, combo);
-                            return rewriteEncrypted(doc, field, plain, blob);
-                        }
-                    }
-                }
-            }
-            record("   payload is encrypted (" + blob.length + " bytes) and the key is still unknown");
-            startMemoryScan(blob, combos);
-            patchLocalCache();
-        } catch (Exception ignored) {
-        }
-        return doc;
-    }
-
-    /** rewrite the decrypted payload and put it back, encrypted */
-    private JSONObject rewriteEncrypted(JSONObject doc, String field, byte[] plain, byte[] blob) {
-        try {
-            String text = new String(plain, StandardCharsets.UTF_8).trim();
-            record("   decrypted " + field + ": " + text.substring(0, Math.min(700, text.length())));
-            Object inner = new JSONObject(text);
-            java.util.List<String> keys = Rules.rewrite(inner, publicUrl);
-            if (!keys.isEmpty()) {
-                record("   decrypted rewrite: " + keys);
-            }
-            byte[] newPlain = inner.toString().getBytes(StandardCharsets.UTF_8);
-            byte[] enc = Crypto.encrypt(cryptoKey, blob, cryptoCombo, newPlain);
-            if (enc != null) {
-                doc.put(field, Crypto.encodeBase64(enc));
-                record("   re-encrypted " + field);
-            }
-        } catch (Exception e) {
-            record("   decrypted payload is not JSON: " + e);
-        }
-        return doc;
     }
 
     /**

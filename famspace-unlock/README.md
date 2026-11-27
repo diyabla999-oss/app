@@ -18,43 +18,56 @@ is tied to something in the binary.
 | the Play Store redirect | gone — PairIP's licence check is neutralised |
 | login | works — the app reports the original Play certificate fingerprint, so the backend accepts its requests |
 | traffic | every request and answer passes through the in-app proxy, and the log shows both |
+| **the wallet** | **unlimited** — `coins`/`gems` → 999 999 999, rewritten inside the encrypted payload and encrypted again |
+| **Premium** | **active** — `vipLv` → 99, `vipEnd` → a far future date, `premiumPurchased`/`isVip`/… → true |
 
-**Does not work yet: the wallet and Premium.**  The API does not answer with
-plain JSON — every payload is encrypted into the `responseData` field:
+### The API crypto is solved
+
+Every payload is encrypted into the `responseData` field:
 
 ```json
 {"success":true,"code":200,"responseData":"<encrypted, base64>","t":1795734498}
 ```
 
-so the wallet is *inside* an encrypted payload and no rule that rewrites a
-field name can reach it.  The rewrite machinery is complete and proven
-(`test_crypto_proxy.sh`: the client receives `gems=999999999` inside a
-correctly re-encrypted payload) — what is missing is the AES key.
+The encryption was read out of the Dart AOT snapshot of `libapp.so`:
 
-The key is **not** in the app's binary.  Everything below was tried against a
-captured payload:
+```
+responseData = base64( ciphertext ‖ index byte )
+```
 
-* 105 million key candidates over `libapp.so` (every offset, printable/hex/
-  base64 forms, SHA-256/MD5 derivations) with AES-CBC/CTR/GCM;
-* 231 million candidates over every printable substring (8–64 chars) of every
-  file in the APK — raw, base64 and hex — with AES, **ChaCha20 and Salsa20**
-  (the heap carries pointycastle's ChaCha20/Salsa20 error messages, and a
-  stream cipher is what the payload lengths point at: 273, 33, 16 bytes);
-* the same sweep with the nonce taken from the key's neighbourhood;
-* the app's own memory at runtime (the proxy reads `/proc/self/mem`): no
-  16/24/32-byte window decrypts it;
-* the HS256 secret of the session token (a JWT is a known-plaintext oracle)
-  and the secret the app signs its requests with (MD5 over the uuid and the
-  request data, in every plausible order) — neither is a string in the app.
+* the **index byte** (the last byte of the blob) selects one of **sixteen
+  AES-128 keys** that the app keeps in a map — the table is in the object
+  pool of `libapp.so` at `pp+0x9230`:
 
-The remaining route is the **Dart AOT**: read the snapshot's object pool,
-find the crypto helper and the key constant.  That needs Blutter and a Dart
-SDK 3.10.9 — a substantial job, and the key may well be obfuscated.
+  | index | key | index | key |
+  |---|---|---|---|
+  | `a` | `x9kPzQjL7vR2wE4F` | `0` | `gH7jK9lM1nB3vC5x` |
+  | `b` | `hG6sN1mVbC8yU3tA` | `1` | `sD6fG8hJ0kL2mN4b` |
+  | `c` | `pL5oI9uJkE0rTqWz` | `2` | `wE3rT5yU7iO9pA1s` |
+  | `d` | `fD2gH4jK6mN8pS0v` | `3` | `qA2zS4xW6cE8dF0v` |
+  | `e` | `cZ1xV3bN5mK7lJ9h` | `4` | `uI5oP7lK9jH1gT3f` |
+  | `f` | `yT4rE6wQ8aI2uO0p` | `5` | `bN8mV6cZ4xL2jK0h` |
+  | | | `6` | `rT1yU3iO5pA7sD9f` |
+  | | | `7` | `kL9jH7gV5bN3mC1x` |
+  | | | `8` | `eW4rT6yU8iO0pA2s` |
+  | | | `9` | `vC5xZ7aQ9wE1sD3f` |
 
-Note also what this can never do: the unlock call is checked **server-side**
+* the cipher is **AES-128-CBC, no padding**, and the **IV is the key
+  itself**;
+* the plaintext is the JSON padded with **zero bytes** up to the block
+  boundary.
+
+The proxy decrypts every answer, rewrites the wallet inside it and encrypts
+it again with the same index byte, so the app picks the same key and sees a
+normal answer.
+
+### What this still cannot do
+
+The unlock call is checked **server-side**
 (`POST /api/v1/space/favorite/unlock` → `{"code":402,"error":"insufficient
 coins"}`).  The server's view of the account cannot be changed from the
-client; a rewrite can only make the *client* believe it is a member.
+client; the rewrite makes the *client* believe it is a member.  Whether a
+paid space actually opens depends on what the server hands out for it.
 
 ---
 
@@ -292,12 +305,23 @@ padding is neutral on purpose: the proxy strips everything in front of
 `/api/v1`, and a padding that looked like `/api/v1` would swallow the app's
 own path.
 
+On top of that the app is patched in `classes2.dex`:
+
+| what | where | why |
+|---|---|---|
+| the proxy is started | `Application.attachBaseContext()` | the framework calls it before the Flutter engine starts, so the proxy listens before the first API request |
+| the Play licence check is neutralised | `LicenseClient.checkLicense()`, `validateResponse()`, `scheduleAppShutdown()`, `onStart()` | otherwise PairIP opens the paywall |
+| the certificate fingerprint is faked | `Security.getCertificateFingerprint()` | the app has to report the *original* Play certificate, or the backend rejects its requests |
+
+The rewrite itself needs no patch: it happens in the proxy, in the middle of
+the traffic.
+
 Rebuild for a different target (e.g. a PC-side proxy on the LAN):
 
 ```bash
 python3 patch_libapp.py --in libapp.so --out libapp.patched.so --ip 192.168.1.50 --port 8888
-./build_apk.sh /workspaces/app/pp/FamSpace.xapk libapp.patched.so output 192.168.1.50 8888
-python3 proxy.py --port 8888 --public http://192.168.1.50:8888 -v
+./build_inapp.sh /workspaces/app/pp/FamSpace.xapk libapp.patched.so output 192.168.1.50 8888
+./build_apk.sh output/FamSpace-inapp-unsigned.xapk libapp.patched.so output 192.168.1.50 8888
 ```
 
 ## 6. Optional: PC-side proxy or mitmproxy
@@ -308,6 +332,10 @@ python3 proxy.py --port 8888 --public http://192.168.1.50:8888 -v
 ```bash
 mitmdump -s mitm_addon.py --listen-host 0.0.0.0 --listen-port 8080
 ```
+
+Both rewrite **plain** JSON answers by field name.  The encrypted answers
+are handled by the in-app proxy, which is the only place that has the key
+table — `ApiCrypto.java` is not part of the desktop tools.
 
 Dart's `HttpClient` on Android only trusts `/system/etc/security/cacerts`
 (`runtime/bin/security_context_linux.cc`, `DART_HOST_OS_ANDROID` branch), so a
@@ -385,44 +413,45 @@ The API does not answer with plain JSON.  Every answer is
 ```
 
 The wallet lives inside the **encrypted** payload, so rewriting it by field
-name can never work — that is why the balance stayed at 50 whatever the
-rules said.  The proxy now
+name alone can never work — that is why the balance stayed at whatever the
+server said, no matter what the rules did.  The proxy now
 
-1. **learns the AES key from the traffic** — the server hands it out in the
-   clear (config, `device/install`), or it is derived from the bearer token;
-   every candidate is checked against the encrypted payloads, and the one
-   that really decrypts them is kept;
-2. **decrypts** the payload,
-3. **rewrites** the wallet (`gems`/`coins` → 999999999, `vipLv` → 99,
-   `canView` → true, costs → 0, …) and
-4. **encrypts it again** — with the same IV/nonce, so the app decrypts it
+1. **decrypts** the payload with the key the index byte points at,
+2. **rewrites** the wallet (`gems`/`coins` → 999999999, `vipLv` → 99,
+   `vipEnd` → 2147483647, `canView` → true, costs → 0, …) and
+3. **encrypts it again** — same key, same index byte, so the app decrypts it
    exactly as it would the original.
 
-`Crypto.java` knows the layouts the `encrypt` package produces
-(`[IV][ciphertext]`, `[1][IV][ciphertext]`, `[nonce][ct][tag]`) for
-CBC / CTR / GCM, and `test_crypto_proxy.sh` proves the whole loop against a
-fake API that answers exactly like Famspace: the client ends up seeing
-`gems=999999999` inside a correctly re-encrypted payload.
+`ApiCrypto.java` implements exactly that, and `TestPipe` proves the whole
+loop against the answers that were captured from the real server: the
+decrypted document is byte-identical to the original apart from the rewritten
+values, and the app sees the rewritten values after the second decryption.
 
-The key is *not* a literal in the binary: 105 million key candidates (every
-offset of `libapp.so`, every printable/hex/base64 form, plus SHA-256/MD5
-derivations) were tried against the captured payload and none decrypted it.
-It is assembled at runtime or handed out by the server — which is why the
-proxy learns it from the traffic instead of from the binary.
+#### How the key was found
 
-### The memory scan
+It was *not* a single hard coded key, and that is why 105 million candidates
+over `libapp.so` (every offset, every printable/hex/base64 form, plus
+SHA-256/MD5 derivations) did not decrypt the payload: the app keeps a
+**table of sixteen keys** and picks one per answer.
 
-The proxy runs **inside the app process**, so it can read `/proc/self/maps`
-and `/proc/self/mem`.  The Dart heap (the read-only heap of `libapp.so`) and
-the app's own heap are mapped there — and so is the key, whether it is a
-constant in the snapshot or something the app assembled at runtime.  When a
-payload cannot be decrypted, the proxy starts a background scan that tries
-every 16/24/32-byte window of the process memory as a key, the snapshot's
-data segment first.  The one that really decrypts the payload is the key.
+The way in was the Dart AOT snapshot:
 
-`TestScan` proves the mechanism: a random key encrypts a JSON payload, and
-the scan finds it in the process' own memory (34 s for 336 MB of regions on a
-server CPU; a couple of minutes on the phone).
+1. the object pool of `libapp.so` was dumped (Blutter) and searched for the
+   crypto helper — the map of sixteen keys sits at `pp+0x9230`, right next
+   to the `"AES/"` string and the `Map<jQ, String>` that maps the cipher
+   mode enum to `CBC`, `CTR`, `ECB`, `OFB-64`, `CFB-64`, `GCM`, …;
+2. the profile model (`/api/v1/me/profile`) was disassembled to see how the
+   numbers are read: every field is a 32 bit `ldur` followed by
+   `sbfiz`/`cmp` — the Dart Smi/Mint check, which is what made it look like
+   a 31 bit integer;
+3. with the key table in hand, the framing fell out of the payload lengths:
+   every answer is `N × 16 + 1` bytes long, and the extra byte is the index
+   into the table;
+4. the IV is the key itself, and the plaintext is padded with zero bytes —
+   which is why the JSON ends with `}\0\0…`;
+5. the last two captured answers did not decrypt, and the reason was a
+   **single mistyped character** in the base64 that had been copied out of
+   the log by hand.  Both decrypt once the typo is corrected.
 
 ### If the wallet still shows the real balance
 
@@ -439,7 +468,7 @@ http://127.0.0.1:8888/__famunlock/health      # which ports are up
 The first line of the log page is always a banner:
 
 ```
-FamUnlock proxy build 2026-11-26-wallet2  listening on ports 8888,888
+FamUnlock proxy build 2026-11-27-wallet7  listening on ports 8888,888
 ```
 
 If that banner is missing, an **old build** is still installed (the one
@@ -450,11 +479,11 @@ bytes) [application/json; charset=utf-8]`.
 
 | log line | meaning |
 |---|---|
-| `learned the API key (AES/CTR/NoPadding[…])` | the key was found — from here on the wallet is rewritten |
-| `decrypted responseData: {…}` | what the server really sent |
-| `decrypted rewrite: [gems, coins, vipLv, …]` | what the proxy changed inside the encrypted payload |
-| `re-encrypted responseData` | the answer was encrypted again and handed to the app |
-| `payload is encrypted (…) and the key is still unknown` | the key could not be derived from the traffic — every request and answer is in the log, so it can be worked out from that |
+| `decrypted responseData: {…}` | what the server really sent (after the decryption) |
+| `wallet: coins=999999999, gems=999999999, vipLv=99, vipEnd=2147483647` | what the app is going to see |
+| `decrypted rewrite: [coins, gems, vipEnd, vipLv]` | what the proxy changed inside the encrypted payload |
+| `re-encrypted responseData (289 bytes)` | the answer was encrypted again and handed to the app |
+| `responseData is encrypted with an unknown key (index 'x')` | the index byte named a key that is not in the table — the answer is passed through untouched |
 | `no rule matched /api/v1/me/profile` | a plain answer without any known wallet field — the `body …` line shows what the server sent |
 
 Every request (with its headers) and every answer (with its body) is in the
@@ -477,7 +506,8 @@ one `./build_inapp.sh` away.
 * Requests are **not** modified: Famspace signs them, so altering a request
   body invalidates the signature and the server rejects it.  `balance` /
   `addedGems` in the IAP request are therefore only readable, not forgeable
-  from here.
+  from here.  (The *answers* are rewritten — that is the other direction and
+  it is not signed.)
 * The original app must be uninstalled first (the signature changed), so the
   app's local data is gone — log in again.
 * The Play Store redirect is gone: `LicenseClient.checkLicense()` returns
@@ -492,18 +522,28 @@ one `./build_inapp.sh` away.
 patch_libapp.py    equal-length host rewrite for libapp.so
 patch_dex.py       neutralise PairIP's Play licence check (in-place dex patch)
 patch_license.sh   decode -> patch PairIP -> reassemble -> swap classes2.dex
+build_inapp.sh     compile the proxy into classes2.dex + patch the app
 build_apk.sh       inject -> re-sign all splits -> repack the XAPK
 build_helper.sh    build the on-device helper APK (aapt2 + d8 + apksigner)
-helper/src/…       the helper app (LocalProxy, Rules, ProxyService, MainActivity)
+build_universal.sh  fold the split set into one installable APK
+helper/src/…       the in-app proxy
+  ApiCrypto.java     the API crypto: the key table, the framing, AES-CBC
+  Json.java          a JSON tree that keeps the key order and the raw text
+  Rules.java         what is rewritten (wallet, VIP, locks, costs)
+  LocalProxy.java    the proxy itself
+  LocalCache.java    patches the app's own cache as a fallback
+  Crypto.java        base64, digests, token helpers
+  ProxyHolder.java   keeps one proxy instance for the process
+  ProxyProvider.java the ContentProvider that starts the proxy
 test_local_proxy.sh  desktop test of the helper's proxy (14 fields verified)
 proxy.py           desktop forwarding proxy + JSON rewriter
 mitm_addon.py      same rules as a mitmproxy addon
 pool_xref.py       find code that loads a given object-pool slot
 aot_dis.py         annotate raw arm64 code the way Blutter does
 install_on_phone.sh  adb install of everything
-build_universal.sh  fold the split set into one installable APK
-verify_apk.sh       the same checks as verify_build.sh, for the single APK
-publish.sh          verify -> copy the build to the download folder -> verify
+verify_build.sh    the checks on the XAPK (dex, libs, signatures, patches)
+verify_apk.sh      the same checks as verify_build.sh, for the single APK
+publish.sh         verify -> copy the build to the download folder -> verify
 ANALYSIS.md        the full REA/Blutter findings
-output/            FamSpace-unlocked.xapk, 19 signed APKs, FamspaceUnlock.apk
+output/            Famspace-universal.apk, the XAPK, the 19 signed splits
 ```

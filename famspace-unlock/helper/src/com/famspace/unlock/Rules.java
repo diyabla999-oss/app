@@ -1,14 +1,12 @@
 package com.famspace.unlock;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
-
-import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 
 /**
- * The rewrite rules, ported 1:1 from the desktop proxy (proxy.py).
+ * The rewrite rules.
  *
  * The goal: make the Famspace client behave as if the server had answered
  * "you own everything" - unlimited wallet, active VIP, every item unlocked
@@ -17,16 +15,17 @@ import java.util.Map;
  * Every rewrite is TYPE PRESERVING: a value is only replaced when the
  * replacement has the same JSON type as the original (number -> number,
  * boolean -> boolean, string -> string).  Swapping a string for a number (or
- * an int for a bool) would break the Dart model's parser - which shows up as
- * "the login does not work" rather than as a crash.
+ * an int for a bool) would break the Dart model of the app - which shows up
+ * as "the login does not work" rather than as a crash.
  */
 public final class Rules {
 
     public static final long BIG = 999999999L;
 
-    private static final Map<String, Object> FORCE = new HashMap<>();
-    private static final Map<String, Object> ZERO_COST = new HashMap<>();
-    private static final Map<String, Object> FUTURE = new HashMap<>();
+    private static final java.util.Map<String, Object> FORCE = new java.util.HashMap<String, Object>();
+    private static final java.util.Map<String, Object> ZERO_COST = new java.util.HashMap<String, Object>();
+    private static final java.util.Map<String, Object> FUTURE = new java.util.HashMap<String, Object>();
+    private static final java.util.Map<String, Object> VINT = new java.util.HashMap<String, Object>();
 
     static {
         // wallet
@@ -146,43 +145,99 @@ public final class Rules {
         FUTURE.put("expiredTime", "2099-12-31T23:59:59Z");
         FUTURE.put("expiresAt", "2099-12-31T23:59:59Z");
         FUTURE.put("endTime", "2099-12-31T23:59:59Z");
+
+        // The profile model reads "vipEnd" as an INT and formats it as a date,
+        // so a date string would not parse.  2038-01-19 (2147483647) is the
+        // largest value that still fits into a signed 32 bit integer.
+        VINT.put("vipEnd", 2147483647L);
+        VINT.put("vipExpire", 2147483647L);
+        VINT.put("expireTime", 2147483647L);
+        VINT.put("expiresAt", 2147483647L);
+        VINT.put("endTime", 2147483647L);
+        VINT.put("expiredTime", 2147483647L);
     }
 
     private Rules() {
     }
 
-    /** Rewrites a decoded JSON tree in place; returns the keys that changed. */
-    public static java.util.List<String> rewrite(Object node, String publicUrl) {
-        java.util.List<String> changed = new java.util.ArrayList<String>();
-        if (node instanceof JSONObject) {
-            JSONObject obj = (JSONObject) node;
-            Iterator<String> keys = obj.keys();
-            while (keys.hasNext()) {
-                String key = keys.next();
-                Object value = obj.opt(key);
-                if (value instanceof JSONObject || value instanceof JSONArray) {
-                    changed.addAll(rewrite(value, publicUrl));
+    // ------------------------------------------------------------ the tree
+
+    /**
+     * Rewrites a decoded JSON tree in place; returns the keys that changed.
+     * The order of the keys and the text of the untouched values are kept.
+     */
+    public static List<String> rewrite(Json node, String publicUrl) {
+        List<String> changed = new ArrayList<String>();
+        rewriteNode(node, publicUrl, changed);
+        return changed;
+    }
+
+    private static void rewriteNode(Json node, String publicUrl, List<String> changed) {
+        Object v = node.value();
+        if (v instanceof Map) {
+            for (Map.Entry<String, Json> e : node.members().entrySet()) {
+                String key = e.getKey();
+                Json child = e.getValue();
+                if (child.isObject() || child.isArray()) {
+                    rewriteNode(child, publicUrl, changed);
                     continue;
                 }
-                Object forced = forcedValue(key, value, publicUrl);
-                if (forced != null && !forced.equals(value)) {
-                    try {
-                        obj.put(key, forced);
-                        changed.add(key);
-                    } catch (Exception ignored) {
-                    }
+                Object forced = forcedValue(key, child.value(), publicUrl);
+                if (forced == null) {
+                    continue;
                 }
+                if (forced.equals(child.value())) {
+                    continue;
+                }
+                String raw = render(forced, child);
+                if (raw == null) {
+                    continue;
+                }
+                child.set(raw, forced);
+                changed.add(key);
             }
-        } else if (node instanceof JSONArray) {
-            JSONArray arr = (JSONArray) node;
-            for (int i = 0; i < arr.length(); i++) {
-                Object value = arr.opt(i);
-                if (value instanceof JSONObject || value instanceof JSONArray) {
-                    changed.addAll(rewrite(value, publicUrl));
-                }
+            return;
+        }
+        if (v instanceof List) {
+            for (Json child : node.items()) {
+                rewriteNode(child, publicUrl, changed);
             }
         }
-        return changed;
+    }
+
+    /**
+     * Renders the replacement value so that it keeps the JSON type of the
+     * original: an integer stays an integer, a decimal stays a decimal.
+     */
+    private static String render(Object forced, Json original) {
+        Object old = original.value();
+        if (old instanceof Number) {
+            if (!(forced instanceof Number)) {
+                return null;
+            }
+            Number n = (Number) forced;
+            boolean wasDecimal = old instanceof Double
+                    || original.raw().indexOf('.') >= 0
+                    || original.raw().indexOf('e') >= 0
+                    || original.raw().indexOf('E') >= 0;
+            if (wasDecimal) {
+                return n.toString();
+            }
+            return Long.toString(n.longValue());
+        }
+        if (old instanceof Boolean) {
+            if (!(forced instanceof Boolean)) {
+                return null;
+            }
+            return ((Boolean) forced).booleanValue() ? "true" : "false";
+        }
+        if (old instanceof String) {
+            if (!(forced instanceof String)) {
+                return null;
+            }
+            return Json.quote((String) forced);
+        }
+        return null;
     }
 
     /**
@@ -196,6 +251,9 @@ public final class Rules {
         Object forced = FORCE.get(key);
         if (forced == null) {
             forced = ZERO_COST.get(key);
+        }
+        if (forced == null) {
+            forced = VINT.get(key);
         }
         if (forced == null) {
             forced = FUTURE.get(key);
@@ -219,7 +277,7 @@ public final class Rules {
                 return forced;
             }
             if (forced instanceof Boolean) {
-                return forced.equals(Boolean.TRUE) ? 1 : 0;
+                return ((Boolean) forced).booleanValue() ? 1L : 0L;
             }
             return null;
         }

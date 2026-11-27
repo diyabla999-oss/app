@@ -39,7 +39,8 @@ mkdir -p "$WORK/classes" "$WORK/dex"
 javac -nowarn -source 8 -target 8 -classpath "$AJ" -d "$WORK/classes" \
   "$HERE"/helper/src/com/famspace/unlock/LocalProxy.java \
   "$HERE"/helper/src/com/famspace/unlock/Crypto.java \
-  "$HERE"/helper/src/com/famspace/unlock/MemoryScan.java \
+  "$HERE"/helper/src/com/famspace/unlock/ApiCrypto.java \
+  "$HERE"/helper/src/com/famspace/unlock/Json.java \
   "$HERE"/helper/src/com/famspace/unlock/LocalCache.java \
   "$HERE"/helper/src/com/famspace/unlock/Rules.java \
   "$HERE"/helper/src/com/famspace/unlock/ProxyHolder.java \
@@ -98,17 +99,6 @@ rm -rf "$WORK/split"; mkdir -p "$WORK/split"
 (cd "$WORK/split" && unzip -q "$WORK/apks/$SPLIT" "lib/arm64-v8a/libapp.so")
 cp "$LIBAPP" "$WORK/split/lib/arm64-v8a/libapp.so"
 (cd "$WORK/split" && zip -q -X -0 "$WORK/apks/$SPLIT" "lib/arm64-v8a/libapp.so")
-
-echo "== injecting the string dictionary (to crack the JWT secret)"
-DICT="${DICT:-$HERE/dict.txt}"
-if [ -f "$DICT" ]; then
-  mkdir -p "$WORK/dict/assets/famunlock"
-  cp "$DICT" "$WORK/dict/assets/famunlock/dict.txt"
-  (cd "$WORK/dict" && zip -q -X "$WORK/apks/com.famspace.app.android.apk" "assets/famunlock/dict.txt")
-  echo "   dictionary: $(stat -c%s "$DICT") bytes"
-else
-  echo "   no dictionary at $DICT (the JWT crack will be skipped)"
-fi
 
 echo "== repacking the unsigned xapk"
 (cd "$WORK/apks" && zip -q -X "$OUT/FamSpace-inapp-unsigned.xapk" manifest.json icon.png *.apk)
