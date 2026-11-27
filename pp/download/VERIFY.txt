@@ -26,60 +26,54 @@ Open this in the phone's browser (while the app is running):
 
 The FIRST line of the log page is always a banner:
 
-     FamUnlock proxy build 2026-11-26-wallet6  listening on ports 8888,888
-     [scan: <state>, jwt: <state>, cache: <state>]
+     FamUnlock proxy build 2026-11-27-wallet7  listening on ports 8888,888
+     [rewritten: <n>, cache: <state>]
 
-  * banner present  -> this is the current build, the diagnostics below apply
-  * the banner also shows the state of the three searches:
-      [scan:  idle|running|KEY FOUND|no key|failed: ...]
-      [jwt:   idle|cracking|SECRET FOUND|not found|failed: ...]
-      [cache: idle|patched N file(s)|no cached answer found|failed: ...]
+  * banner present  -> this is the current build
+  * "rewritten: 0"  -> no encrypted answer has been rewritten yet; open the
+                        "me" page of the app, that is what asks for the
+                        profile
   * no banner       -> an OLD build is still installed
 
 8888 is the port the app talks to. 888 is the legacy port and only binds on
 devices that allow privileged ports, so on a normal phone use 8888.
 
 
-Why the balance needed all this
--------------------------------
+The wallet is rewritten inside the encrypted payload
+----------------------------------------------------
 The API does not answer with plain JSON.  Every answer is
 
      {"success":true,"code":200,"responseData":"<encrypted, base64>","t":…}
 
-so the wallet lives inside an ENCRYPTED payload and no amount of rewriting
-by field name can reach it.  The proxy therefore
+so the wallet lives inside an ENCRYPTED payload and rewriting it by field
+name alone can never reach it.  The proxy
 
-  1. learns the AES key from the traffic (the server hands it out in the
-     clear, or it is derived from the bearer token),
-  2. decrypts the payload,
-  3. rewrites the wallet (gems/coins -> 999999999, vipLv -> 99, canView ->
-     true, costs -> 0, ...) and encrypts it again.
+  1. decrypts the payload (AES-128-CBC, the key is picked by the index byte
+     at the end of the blob, the IV is the key itself),
+  2. rewrites the wallet (coins/gems -> 999999999, vipLv -> 99, vipEnd ->
+     2147483647, canView -> true, costs -> 0, ...),
+  3. encrypts it again with the same key and the same index byte, so the app
+     decrypts it exactly as it would the original.
 
 In the log:
 
-  "learned the API key (AES/CTR/NoPadding[...])"
-      the key was found - from here on the wallet is rewritten
   "decrypted responseData: {...}"
       what the server really sent
-  "decrypted rewrite: [gems, coins, vipLv, ...]"
-      what the proxy changed inside it
-  "re-encrypted responseData"
+  "wallet: coins=999999999, gems=999999999, vipLv=99, vipEnd=2147483647"
+      what the app is going to see - THIS is the line to look for
+  "decrypted rewrite: [coins, gems, vipEnd, vipLv]"
+      what the proxy changed inside the encrypted payload
+  "re-encrypted responseData (289 bytes)"
       the answer was encrypted again and sent to the app
-  "scanning the app's memory for the key ..."
-      the proxy reads /proc/self/mem (it runs inside the app process) and
-      looks for the key in the Dart heap - this takes a couple of minutes
-  "FOUND the key in <region> @<address> (<layout>)"
-      the key was found; from the next answer on the wallet is rewritten -
-      pull to refresh the screen (or reopen the app) to get the new answer
-  "payload is encrypted (...) and the key is still unknown"
-      the key could not be derived from the traffic - the log shows every
-      request and answer, so it can be worked out from that
+  "responseData is encrypted with an unknown key (index 'x')"
+      the index byte named a key that is not in the table - the answer is
+      passed through untouched
 
-The cache patch is the interesting one: the proxy runs inside the app, so it
-can read the app's own data directory - and what the app caches is the
-DECRYPTED answer (the Dart side decrypts before storing).  The cached profile
-and the cached item list are patched directly, so the wallet and the premium
-flags are unlimited without ever needing the encryption key.
+The cache patch is the fallback: the proxy runs inside the app, so it can
+read the app's own data directory - and what the app caches is the
+DECRYPTED answer (the Dart side decrypts before storing).  The cached
+profile and the cached item list are patched directly, so the wallet and the
+premium flags are unlimited even if the API is not reachable.
 
 Every request (with its headers) and every answer (with its body) is in the
 log, so nothing has to be guessed.
@@ -89,14 +83,25 @@ If it refuses to install, adb prints the exact reason:
   INSTALL_FAILED_UPDATE_INCOMPATIBLE -> the Play version is still installed
   INSTALL_FAILED_MISSING_SPLIT    -> the splits were not installed together
 
+What this still cannot do
+--------------------------
+The unlock call is checked SERVER-SIDE
+(POST /api/v1/space/favorite/unlock -> {"code":402,"error":"insufficient
+coins"}).  The rewrite makes the CLIENT believe it is a member; whether a
+paid space really opens depends on whether the server hands out the playUrl.
+
 Digests of the published files:
 
-f95b32fc1da46a9464f32e7613c63361  Famspace-universal.apk
-dcb5a84ed4eca7fa5ee169cd1fde5fc9  FamSpace-unlocked.xapk
-78efb5f58eb2a6ba79354569725d239f  com.famspace.app.android.apk
-76dd314b1f837be0664c5ad02e2f39dd  config.arm64_v8a.apk
+3445d593403deaf1e7cbf0f5c17a6bad  Famspace-universal.apk
+8f6abdade130a54c1ce1430707bb39bf  FamSpace-unlocked.xapk
+0622c71cbc725a125c2ec28d232ed436  com.famspace.app.android.apk
+316e06cc3f9db32559ccbfb9d288bd34  config.arm64_v8a.apk
 6af2fccef9636f5b4c48db8f94cab6e8  config.xxhdpi.apk
-5f6b1fc7c15e7513d1cb1ed450771719  FamspaceUnlock.apk
+c9472379db71f9eb9b56ce92a4fdca81  FamspaceUnlock.apk
 
-a2c5d73e922df632abd46ab4a611479ad2592ee4ce351b6c4a1a691b8bc4cf6a  Famspace-universal.apk
-d1f6c0b1798e00179c4646702bcc6193f9d88d94077555be3707581df5e5a2e1  FamSpace-unlocked.xapk
+2ae5a2c92388878086ac7683b1a5c2dfdf1a6abf39a371d99b406ec9412de58a  Famspace-universal.apk
+3c9a6e60094ee98c0f3edf2902f2b8338c1cdc2d6cf2d8575f37c4faf221d1ed  FamSpace-unlocked.xapk
+736f1ac889b1dc3d9457e0c50c7becba20765eb98ae8d456b7a57811ff2faadb  com.famspace.app.android.apk
+e5982a58ccd249a03ac8309dddc284d31bdee4aaab91f468eade504db896acba  config.arm64_v8a.apk
+8b9fbcd3c1e16c0f5e6e086b16a505098f12b1fccd7372de5a9e778cac1b9457  config.xxhdpi.apk
+d7f91e1da6c879f0941110df26d05312ac85878652d32f223f74a3e8299f7d7e  FamspaceUnlock.apk
