@@ -6,8 +6,8 @@ the encrypted payload.**
 ## 1. `Famspace-universal.apk` — one file, one tap (recommended)
 
 ```
-md5    3445d593403deaf1e7cbf0f5c17a6bad
-sha256 2ae5a2c92388878086ac7683b1a5c2dfdf1a6abf39a371d99b406ec9412de58a
+md5    c7a7f57c49c2f27bcce131d403516f8d
+sha256 d685bf52e002d759fa9e1d8e0694199b7c1db78fd14598da920474482213c9ac
 ```
 
 84.5 MB. Copy it to the phone and tap it. No XAPK installer, no split
@@ -20,7 +20,7 @@ handling, no second app.
 3. Tap `Famspace-universal.apk`, then open **Famspace**.
 
 The split set of 1.0.8 is only base + native libraries: the `config.arm64_v8a`
-split holds the 21 `.so` files and no resources, `config.xxhdpi` adds ~100
+split holds the 22 `.so` files and no resources, `config.xxhdpi` adds ~100
 xxhdpi drawables and the language splits add ~163 AndroidX strings. The app
 is Flutter — its UI is drawn from `assets/` by the Dart code — so the
 universal APK keeps the base's own resource table and manifest byte-identical
@@ -29,8 +29,8 @@ and only folds in the libraries.
 ## 2. `FamSpace-unlocked.xapk` — the same app as a split set
 
 ```
-md5    8f6abdade130a54c1ce1430707bb39bf
-sha256 3c9a6e60094ee98c0f3edf2902f2b8338c1cdc2d6cf2d8575f37c4faf221d1ed
+md5    569487fafcdc9b2270a74f46b66101c8
+sha256 29201e0f7ba6673e520c0c4d8b4f47efc9bed1de2c4216dc5cb4324781d6bbbe
 ```
 
 85.4 MB, base + 19 splits. Install with an XAPK installer — **all splits have
@@ -120,6 +120,29 @@ The line to look for is
 ```
 wallet: coins=999999999, gems=999999999, vipLv=99, vipEnd=2147483647
 ```
+
+## Fixed: the "Invalid HTTP header field value" error
+
+The previous build also patched the app's own cache. It read every file in
+the app's data directory as UTF-8, rewrote the wallet in it and wrote it back.
+The app keeps its state in **MMKV**, and an MMKV file is a sequence of
+length-prefixed records (`[varint keyLen][key][varint valueLen][value]`), so
+changing the length of a number inside a value shifted every record after it.
+The app then read `auth_access_token` at the wrong offset and got
+
+```
+Bearer ccess_token <varint bytes> eyJhbGciOi...
+```
+
+which Dio rejects as an invalid header — before the request is sent. That is
+why the channel and video pages failed while the wallet still showed the
+rewritten balance.
+
+The cache patch is gone; the proxy no longer writes to the app's storage at
+all. If the MMKV store contains the prior build's corruption signature, this
+build clears that store once, on the first start, before the Flutter engine
+opens it. **Log in again once** if it was cleared — that is expected. The
+banner then reports `repair: cleared MMKV - log in again`.
 
 ## What this still cannot do
 

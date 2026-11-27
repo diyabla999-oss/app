@@ -9,9 +9,22 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WORK="$(mktemp -d /tmp/opencode/proxytest.XXXXXX)"
-trap 'rm -rf "$WORK"; pkill -f "FakeUpstream" 2>/dev/null || true' EXIT
-
 JSON_JAR="${JSON_JAR:-$HOME/tools/json-20231013.jar}"
+ANDROID_JAR="${ANDROID_JAR:-$HOME/tools/android-sdk/android-35/android.jar}"
+TEST_UPSTREAM_PORT="${TEST_UPSTREAM_PORT:-19999}"
+TEST_PROXY_PORT="${TEST_PROXY_PORT:-18888}"
+export TEST_PROXY_PORT
+UPSTREAM_PID=""
+PROXY_PID=""
+cleanup() {
+  [ -z "$PROXY_PID" ] || kill "$PROXY_PID" 2>/dev/null || true
+  [ -z "$UPSTREAM_PID" ] || kill "$UPSTREAM_PID" 2>/dev/null || true
+  [ -z "$PROXY_PID" ] || wait "$PROXY_PID" 2>/dev/null || true
+  [ -z "$UPSTREAM_PID" ] || wait "$UPSTREAM_PID" 2>/dev/null || true
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
+
 if [ ! -f "$JSON_JAR" ]; then
   mkdir -p "$HOME/tools"
   curl -sL -o "$JSON_JAR" https://repo1.maven.org/maven2/org/json/json/20231013/json-20231013.jar
@@ -26,7 +39,7 @@ import java.nio.charset.StandardCharsets;
 
 public class FakeUpstream {
     public static void main(String[] a) throws Exception {
-        HttpServer s = HttpServer.create(new InetSocketAddress("127.0.0.1", 9999), 0);
+        HttpServer s = HttpServer.create(new InetSocketAddress("127.0.0.1", Integer.parseInt(a[0])), 0);
         s.createContext("/", new HttpHandler() {
             public void handle(HttpExchange e) throws IOException {
                 String body = "{\"code\":0,\"data\":{\"gems\":12,\"coins\":3,\"coin\":7,"
@@ -55,7 +68,7 @@ import com.famspace.unlock.LocalProxy;
 
 public class RunProxy {
     public static void main(String[] a) throws Exception {
-        LocalProxy p = new LocalProxy(new String[]{"http://127.0.0.1:9999"}, 8888, "http://127.0.0.1:8888");
+        LocalProxy p = new LocalProxy(new String[]{"http://127.0.0.1:" + a[0]}, Integer.parseInt(a[1]), "http://127.0.0.1:" + a[1]);
         p.start();
         Thread.sleep(60000);
     }
@@ -63,20 +76,25 @@ public class RunProxy {
 EOF
 
 echo "== compile"
-javac -nowarn -d "$WORK/classes" -cp "$JSON_JAR" \
+javac -nowarn -d "$WORK/classes" -cp "$JSON_JAR:$ANDROID_JAR" \
   "$HERE/helper/src/com/famspace/unlock/LocalProxy.java" \
   "$HERE/helper/src/com/famspace/unlock/Rules.java" \
+  "$HERE/helper/src/com/famspace/unlock/Json.java" \
+  "$HERE/helper/src/com/famspace/unlock/ApiCrypto.java" \
+  "$HERE/helper/src/com/famspace/unlock/Repair.java" \
   "$HERE/helper/src/com/famspace/unlock/Crypto.java" \
   "$WORK/FakeUpstream.java" "$WORK/RunProxy.java"
 
 echo "== run"
-java -cp "$WORK/classes:$JSON_JAR" FakeUpstream &
+java -cp "$WORK/classes:$JSON_JAR:$ANDROID_JAR" FakeUpstream "$TEST_UPSTREAM_PORT" &
+UPSTREAM_PID=$!
 sleep 1
-java -cp "$WORK/classes:$JSON_JAR" RunProxy &
+java -cp "$WORK/classes:$JSON_JAR:$ANDROID_JAR" RunProxy "$TEST_UPSTREAM_PORT" "$TEST_PROXY_PORT" &
+PROXY_PID=$!
 sleep 2
 
 echo "== request"
-BODY="$(curl -s -m 10 http://127.0.0.1:8888/api/v1/me/profile)"
+BODY="$(curl -s -m 10 "http://127.0.0.1:$TEST_PROXY_PORT/api/v1/me/profile")"
 echo "$BODY"
 
 python3 - "$BODY" <<'EOF'
@@ -89,7 +107,7 @@ checks = {
     "vipLv": 99, "canView": True,
     "canDownload": True, "isLocked": False, "unlockType": "", "alreadyUnlocked": True,
     "dailyLimit": 100000, "expireDay": 36500, "premiumPurchased": True,
-    "baseUrl": "http://127.0.0.1:8888", "playUrl": "https://x/y.m3u8", "price": 150,
+    "baseUrl": "http://127.0.0.1:" + str(int(__import__('os').environ.get('TEST_PROXY_PORT', '18888'))), "playUrl": "https://x/y.m3u8", "price": 150,
 }
 bad = {k: (d.get(k), v) for k, v in checks.items() if d.get(k) != v}
 if bad:
@@ -99,5 +117,5 @@ print("PASS - all", len(checks), "fields rewritten as expected")
 EOF
 
 echo "== padded path"
-curl -s -m 10 http://127.0.0.1:8888/xxx/api/v1/me/profile | python3 -c "import sys,json; d=json.load(sys.stdin)['data']; print('gems',d['gems'],'vipLv',d['vipLv'],'baseUrl',d['baseUrl'])"
+curl -s -m 10 "http://127.0.0.1:$TEST_PROXY_PORT/xxx/api/v1/me/profile" | python3 -c "import sys,json; d=json.load(sys.stdin)['data']; print('gems',d['gems'],'vipLv',d['vipLv'],'baseUrl',d['baseUrl'])"
 echo "OK"

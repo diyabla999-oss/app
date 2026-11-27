@@ -33,7 +33,7 @@ public final class LocalProxy {
      * serving a request - an old build without this marker cannot be told
      * apart from a new one that simply has nothing to log.
      */
-    public static final String BUILD_ID = "2026-11-27-wallet7";
+    public static final String BUILD_ID = "2026-11-27-wallet8";
 
     // Android refuses privileged ports (<1024) for unprivileged apps:
     // binding 888 fails with BindException: EACCES (permission denied).
@@ -67,9 +67,6 @@ public final class LocalProxy {
 
     // how many encrypted answers have been decrypted and rewritten
     private volatile int rewrittenCount;
-    // the state of the cache patch
-    private volatile String cacheState = "idle";
-    private volatile boolean cachePatched;
 
     public LocalProxy() {
         this(UPSTREAM, DEFAULT_PORT, "http://127.0.0.1:" + DEFAULT_PORT);
@@ -128,7 +125,6 @@ public final class LocalProxy {
             }
         }
         running = true;
-        patchLocalCache();
         for (final ServerSocket s : servers) {
             Thread t = new Thread(() -> serve(s), "famunlock-" + s.getLocalPort());
             t.setDaemon(false);
@@ -231,7 +227,7 @@ public final class LocalProxy {
                 sb.append("FamUnlock proxy build ").append(BUILD_ID)
                         .append("  listening on ports ").append(ports())
                         .append("  [rewritten: ").append(rewrittenCount)
-                        .append(", cache: ").append(cacheState).append(']').append('\n');
+                        .append(", repair: ").append(Repair.state).append(']').append('\n');
                 synchronized (log) {
                     for (String entry : log) {
                         sb.append(entry).append('\n');
@@ -468,57 +464,25 @@ public final class LocalProxy {
         return sb.length() == 0 ? "(no wallet fields)" : sb.toString();
     }
 
-    /**
-     * Patches the app's own cache.  What the app caches is the DECRYPTED
-     * answer (the Dart side decrypts before storing), so the wallet and the
-     * premium flags can be set there - no key needed.
+    /*
+     * There used to be a cache patcher here.  It read every file in the app's
+     * data directory as UTF-8, rewrote the wallet in it and wrote it back.
+     *
+     * That was a mistake.  The app keeps its state in MMKV, and an MMKV file
+     * is a sequence of length-prefixed records - [varint keyLen][key]
+     * [varint valueLen][value].  Rewriting a number inside a value changes
+     * its length but not the prefix, so every record after it shifts.  The
+     * app then read auth_access_token at the wrong offset and got
+     *
+     *     ccess_token <varint bytes> eyJhbGciOi...
+     *
+     * Dio rejects that as an invalid header and every request that needs the
+     * token fails before it is sent.
+     *
+     * It is not needed either: the wallet is rewritten inside the encrypted
+     * answer, which is the copy the app actually uses.  The proxy now never
+     * writes to the app's storage.
      */
-    private void patchLocalCache() {
-        if (cachePatched) {
-            return;
-        }
-        cachePatched = true;
-        Thread t = new Thread(new CacheTask(this), "famunlock-cache");
-        t.setDaemon(true);
-        t.start();
-    }
-
-    /** the cache patch (a named class: d8 trips over nested anonymous ones) */
-    private static final class CacheTask implements Runnable {
-        private final LocalProxy proxy;
-
-        CacheTask(LocalProxy proxy) {
-            this.proxy = proxy;
-        }
-
-        public void run() {
-            // the Dart side stores the answer AFTER it was received, so the
-            // cache is patched again and again for a while
-            for (int round = 0; round < 20; round++) {
-                try {
-                    List<LocalCache.Hit> hits = LocalCache.patch();
-                    if (!hits.isEmpty()) {
-                        for (LocalCache.Hit h : hits) {
-                            proxy.record("   patched " + h.file + " -> " + h.keys);
-                        }
-                        proxy.cacheState = "patched " + hits.size() + " file(s)";
-                    } else if (round == 0) {
-                        proxy.cacheState = "no cached answer found";
-                        proxy.record("   no cached answer with a wallet in the app's data dir");
-                    }
-                } catch (Throwable e) {
-                    proxy.cacheState = "failed: " + e;
-                    proxy.record("   cache patch failed: " + e);
-                    return;
-                }
-                try {
-                    Thread.sleep(3000);
-                } catch (InterruptedException ignored) {
-                    return;
-                }
-            }
-        }
-    }
 
     /**
      * The request body carries the per request material in the clear:

@@ -149,7 +149,8 @@ KEY_RE = re.compile(
 def rewrite_value(key, value):
     """Force a single JSON value."""
     if key == "baseUrl" and PUBLIC_URL:
-        # keep the app talking to this proxy instead of the real service host
+        # Keep API requests on the local proxy. Media URLs (playUrl) are not
+        # rewritten; their original CDN host must remain reachable.
         return PUBLIC_URL, True
     if key in FORCE_VALUES:
         return FORCE_VALUES[key], True

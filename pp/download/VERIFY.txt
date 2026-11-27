@@ -26,8 +26,8 @@ Open this in the phone's browser (while the app is running):
 
 The FIRST line of the log page is always a banner:
 
-     FamUnlock proxy build 2026-11-27-wallet7  listening on ports 8888,888
-     [rewritten: <n>, cache: <state>]
+     FamUnlock proxy build 2026-11-27-wallet8  listening on ports 8888,888
+     [rewritten: <n>, repair: <state>]
 
   * banner present  -> this is the current build
   * "rewritten: 0"  -> no encrypted answer has been rewritten yet; open the
@@ -69,11 +69,23 @@ In the log:
       the index byte named a key that is not in the table - the answer is
       passed through untouched
 
-The cache patch is the fallback: the proxy runs inside the app, so it can
-read the app's own data directory - and what the app caches is the
-DECRYPTED answer (the Dart side decrypts before storing).  The cached
-profile and the cached item list are patched directly, so the wallet and the
-premium flags are unlimited even if the API is not reachable.
+The "repair" field is the one-time fix of the store the previous build
+damaged.  That build rewrote the app's MMKV file as if it were text; MMKV
+records are length-prefixed, so the rewrite shifted every record after the
+first one and the stored access token became unreadable ("ccess_token" +
+varint bytes + the JWT).  Dio then rejected the header with "Invalid HTTP
+header field value" and every page that needs the token failed.  A shifted
+MMKV file cannot be repaired, so this build removes it once, before the
+Flutter engine opens it:
+
+  "repair: cleared MMKV - log in again"
+      the MMKV store contained the corruption signature from the previous
+      build; the app now asks for the login. This happens exactly once.
+  "repair: store ok" / "repair: done earlier"
+      no corruption was found, or the one-time check already ran.
+
+The proxy never writes to the app's storage any more - the wallet is
+rewritten inside the encrypted answer, which is the copy the app uses.
 
 Every request (with its headers) and every answer (with its body) is in the
 log, so nothing has to be guessed.
@@ -92,16 +104,16 @@ paid space really opens depends on whether the server hands out the playUrl.
 
 Digests of the published files:
 
-3445d593403deaf1e7cbf0f5c17a6bad  Famspace-universal.apk
-8f6abdade130a54c1ce1430707bb39bf  FamSpace-unlocked.xapk
-0622c71cbc725a125c2ec28d232ed436  com.famspace.app.android.apk
-316e06cc3f9db32559ccbfb9d288bd34  config.arm64_v8a.apk
+c7a7f57c49c2f27bcce131d403516f8d  Famspace-universal.apk
+569487fafcdc9b2270a74f46b66101c8  FamSpace-unlocked.xapk
+e0a453dabdfce78dda80fb64cee4137d  com.famspace.app.android.apk
+8695a30f499341440709f1f52d134139  config.arm64_v8a.apk
 6af2fccef9636f5b4c48db8f94cab6e8  config.xxhdpi.apk
-c9472379db71f9eb9b56ce92a4fdca81  FamspaceUnlock.apk
+269ecb137405a77c075a7c32fe318035  FamspaceUnlock.apk
 
-2ae5a2c92388878086ac7683b1a5c2dfdf1a6abf39a371d99b406ec9412de58a  Famspace-universal.apk
-3c9a6e60094ee98c0f3edf2902f2b8338c1cdc2d6cf2d8575f37c4faf221d1ed  FamSpace-unlocked.xapk
-736f1ac889b1dc3d9457e0c50c7becba20765eb98ae8d456b7a57811ff2faadb  com.famspace.app.android.apk
-e5982a58ccd249a03ac8309dddc284d31bdee4aaab91f468eade504db896acba  config.arm64_v8a.apk
+d685bf52e002d759fa9e1d8e0694199b7c1db78fd14598da920474482213c9ac  Famspace-universal.apk
+29201e0f7ba6673e520c0c4d8b4f47efc9bed1de2c4216dc5cb4324781d6bbbe  FamSpace-unlocked.xapk
+70790d36106b01983c7341bd083e54463d501376f8dfd15760a757cf26bfd454  com.famspace.app.android.apk
+0a31aebeae08b16d455d4bca04a8fbab1e52441852c6799e56e17e2327b82a26  config.arm64_v8a.apk
 8b9fbcd3c1e16c0f5e6e086b16a505098f12b1fccd7372de5a9e778cac1b9457  config.xxhdpi.apk
-d7f91e1da6c879f0941110df26d05312ac85878652d32f223f74a3e8299f7d7e  FamspaceUnlock.apk
+8bf6f1997a23b868128ee93901d9ed87ec5651755ff9bf9384a0d8660c6aa2e1  FamspaceUnlock.apk

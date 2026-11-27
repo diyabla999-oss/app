@@ -246,6 +246,8 @@ public final class Rules {
      */
     private static Object forcedValue(String key, Object value, String publicUrl) {
         if ("baseUrl".equals(key) && publicUrl != null && value instanceof String) {
+            // Keep API requests on the local proxy. Media URLs such as playUrl
+            // remain untouched and continue to point at their CDN.
             return publicUrl;
         }
         Object forced = FORCE.get(key);

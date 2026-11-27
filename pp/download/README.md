@@ -96,7 +96,7 @@ The split set of 1.0.8 is really just that:
 | split | content |
 |---|---|
 | `com.famspace.app.android.apk` | dex, assets, res/, `mipmap-{m,h,xh,xxh,xxxh}dpi` launcher icons, layouts, anims |
-| `config.arm64_v8a.apk` | the 21 native libraries, **no resources at all** |
+| `config.arm64_v8a.apk` | the 22 native libraries, **no resources at all** |
 | `config.xxhdpi.apk` | ~100 extra xxhdpi drawables (AndroidX 9-patches and small vectors) |
 | `config.<lang>.apk` | ~163 translated strings (AndroidX widget labels + the launcher label) |
 
@@ -181,7 +181,7 @@ locked / isLocked / memberOnly / needUnlock -> false
 unlockType -> ""       alreadyUnlocked -> true
 unlock costs (cost, coinCost, gemCost, unlockCost …) -> 0
 dailyLimit / adWatchLimit / unlockLimit … -> 100000
-baseUrl -> the proxy itself (so the app keeps using it)
+baseUrl -> the API proxy (media URLs remain on their CDN hosts)
 ```
 
 IAP product prices are deliberately **not** touched, so the purchase flow
@@ -468,7 +468,8 @@ http://127.0.0.1:8888/__famunlock/health      # which ports are up
 The first line of the log page is always a banner:
 
 ```
-FamUnlock proxy build 2026-11-27-wallet7  listening on ports 8888,888
+FamUnlock proxy build 2026-11-27-wallet8  listening on ports 8888,888
+[rewritten: 12, repair: store ok]
 ```
 
 If that banner is missing, an **old build** is still installed (the one
@@ -496,6 +497,29 @@ The rules cover `coins`, `gems`, `balance` and the usual variants
 that is not in the rules, that name goes into `Rules.FORCE` and the build is
 one `./build_inapp.sh` away.
 
+
+### The build before this one corrupted the stored login
+
+That build also patched the app's own cache: it read every file under
+`/data/data/com.famspace.app.android` as UTF-8, rewrote the wallet in it and
+wrote it back.  The app keeps its state in **MMKV** (`libmmkv.so`), and an
+MMKV file is a sequence of length-prefixed records —
+`[varint keyLen][key][varint valueLen][value]`.  Rewriting a number inside a
+value changes its length but not its prefix, so every record after it shifts.
+The app then read `auth_access_token` at the wrong offset and got
+`ccess_token` + varint bytes + the JWT, and Dio rejected the header with
+
+```
+FormatException: Invalid HTTP header field value: "Bearer ccess_token…"
+```
+
+before the request was sent.  That is why the channel and video pages failed
+while the wallet still showed the rewritten balance.
+
+The cache patch is gone — the proxy no longer writes to the app's storage at
+all.  A shifted MMKV file cannot be repaired, so `Repair` clears the MMKV store
+once, on the first start of this build, before the Flutter engine opens it.
+The app then asks for the login again; that happens exactly once.
 
 ## 8. Limits of this build
 
@@ -531,11 +555,12 @@ helper/src/…       the in-app proxy
   Json.java          a JSON tree that keeps the key order and the raw text
   Rules.java         what is rewritten (wallet, VIP, locks, costs)
   LocalProxy.java    the proxy itself
-  LocalCache.java    patches the app's own cache as a fallback
+  Repair.java        one-time repair of the store the old build damaged
   Crypto.java        base64, digests, token helpers
   ProxyHolder.java   keeps one proxy instance for the process
   ProxyProvider.java the ContentProvider that starts the proxy
-test_local_proxy.sh  desktop test of the helper's proxy (14 fields verified)
+  test_crypto_proxy.sh  crypto round-trip against captured server answers
+  helper/test/TestRepair.java one-time MMKV repair regression test
 proxy.py           desktop forwarding proxy + JSON rewriter
 mitm_addon.py      same rules as a mitmproxy addon
 pool_xref.py       find code that loads a given object-pool slot

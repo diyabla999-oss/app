@@ -22,18 +22,13 @@ public final class ProxyHolder {
     private ProxyHolder() {
     }
 
-    /** finds the data directory of the app (used to patch its cache) */
-    private static void findDataDir(Context context) {
-        if (context != null && LocalCache.dataDir == null) {
-            try {
-                LocalCache.dataDir = context.getApplicationInfo().dataDir;
-            } catch (Throwable ignored) {
-            }
-        }
-    }
-
     public static synchronized void ensureStarted(Context context) {
-        findDataDir(context);
+        // The previous build rewrote the app's MMKV store as if it were text,
+        // which shifted every record after the first rewrite and made the
+        // stored access token unreadable.  This runs before the Flutter engine
+        // starts, so the store is not open yet - the only moment it can be
+        // removed safely.  See Repair.
+        Repair.heal(context);
         if (proxy != null && proxy.isRunning()) {
             status = "running on " + proxy.publicUrl() + " (ports " + proxy.ports() + ")";
             return;

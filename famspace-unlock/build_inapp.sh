@@ -41,7 +41,7 @@ javac -nowarn -source 8 -target 8 -classpath "$AJ" -d "$WORK/classes" \
   "$HERE"/helper/src/com/famspace/unlock/Crypto.java \
   "$HERE"/helper/src/com/famspace/unlock/ApiCrypto.java \
   "$HERE"/helper/src/com/famspace/unlock/Json.java \
-  "$HERE"/helper/src/com/famspace/unlock/LocalCache.java \
+  "$HERE"/helper/src/com/famspace/unlock/Repair.java \
   "$HERE"/helper/src/com/famspace/unlock/Rules.java \
   "$HERE"/helper/src/com/famspace/unlock/ProxyHolder.java \
   "$HERE"/helper/src/com/famspace/unlock/ProxyProvider.java 2>&1 | grep -v "bootstrap class path" || true
